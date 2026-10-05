@@ -140,7 +140,7 @@ func TestCaptureForms(t *testing.T) {
 	if fixed.Project == nil || *fixed.Project != "aws" || strings.Join(fixed.Tags, ",") != "iam,security" {
 		t.Errorf("shorthand not applied: %+v", fixed)
 	}
-	dec := all[byBody["Decision: retain the existing deployment model for now"]]
+	dec := all[byBody["retain the existing deployment model for now"]]
 	if dec.Type == nil || *dec.Type != "decision" || len(dec.Marks) != 1 {
 		t.Errorf("type inference or mark missing: %+v", dec)
 	}

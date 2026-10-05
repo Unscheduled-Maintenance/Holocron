@@ -671,3 +671,14 @@ func TestFilterChangeDuringPageLoadKeepsPaging(t *testing.T) {
 		t.Fatalf("paging stuck after a filter change: %d of %d", len(m.entries), m.total)
 	}
 }
+
+func TestQuickAddTypePrefixIsStripped(t *testing.T) {
+	m := start(t, 100, 30)
+	m = send(t, m, key("a"))
+	m = typeText(t, m, "Decision: keep weekly deploy windows +Infra")
+	m = send(t, m, key("enter"))
+	c := m.current()
+	if c == nil || c.Type != journal.TypeDecision || c.Body != "keep weekly deploy windows" || c.Project != "Infra" {
+		t.Fatalf("quick add with a type prefix = %+v", c)
+	}
+}

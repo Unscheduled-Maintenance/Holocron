@@ -12,12 +12,15 @@ type Capture struct {
 	Project string
 	Tags    []string
 	Type    Type
+	// TypePrefix is the "Decision: " text removed from the start of Body when
+	// it set Type, so a caller overriding the type can put it back.
+	TypePrefix string
 }
 
 var (
 	wordRe     = regexp.MustCompile(`\S+`)
 	sigilRe    = regexp.MustCompile(`^([+#])(\p{L}[\p{L}\p{N}_./:-]*?)([.,;:!?)]*)$`)
-	typeLeadRe = regexp.MustCompile(`(?i)^(decision|problem|investigation|follow-?up|accomplishment|note|work)\s*:\s*\S`)
+	typeLeadRe = regexp.MustCompile(`(?i)^(decision|problem|investigation|follow-?up|accomplishment|note|work)\s*:\s*(\S)`)
 )
 
 // ParseShorthand extracts +project and #tag tokens from quick-capture text.
@@ -30,8 +33,9 @@ var (
 //   - Tokens in the middle of a sentence keep their word in the body without
 //     the sigil: "Patched #security hole" stores "Patched security hole".
 //   - At most one +project may be given.
-//   - Text beginning with a type name and a colon ("Decision: ...") gets
-//     that type unless one is set explicitly. The body is left unchanged.
+//   - Text beginning with a type name and a colon ("Decision: ...") gets that
+//     type, and the prefix is removed from the body: "Decision: keep it"
+//     stores "keep it" as a decision.
 //
 // Shells treat an unquoted # as a comment, so #tags must be inside quotes.
 func ParseShorthand(text string) (Capture, error) {
@@ -89,9 +93,11 @@ func ParseShorthand(text string) (Capture, error) {
 		}
 		c.Body = strings.TrimSpace(b.String())
 	}
-	if m := typeLeadRe.FindStringSubmatch(c.Body); m != nil {
-		if t, err := ParseType(m[1]); err == nil {
+	if m := typeLeadRe.FindStringSubmatchIndex(c.Body); m != nil {
+		if t, err := ParseType(c.Body[m[2]:m[3]]); err == nil {
 			c.Type = t
+			c.TypePrefix = c.Body[:m[4]]
+			c.Body = c.Body[m[4]:]
 		}
 	}
 	return c, nil
