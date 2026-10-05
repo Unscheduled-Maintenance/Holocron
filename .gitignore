@@ -1,0 +1,35 @@
+# Build output
+/holocron
+/holocron.exe
+/dist/
+/bin/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Local archives, backups and exports created while testing
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+/exports/
+/tmp/
+holocron-*.md
+holocron-*.json
+
+# Local configuration and secrets
+.env
+.env.*
+config.local.toml
+
+# Editors and OS files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

@@ -1,0 +1,48 @@
+# GoReleaser configuration for tagged releases. Local development does not
+# need GoReleaser: `go build ./cmd/holocron` is enough.
+version: 2
+
+project_name: holocron
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: holocron
+    main: ./cmd/holocron
+    binary: holocron
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/Unscheduled-Maintenance/Holocron/internal/cli.Version={{.Version}}
+      - -X github.com/Unscheduled-Maintenance/Holocron/internal/cli.Commit={{.ShortCommit}}
+      - -X github.com/Unscheduled-Maintenance/Holocron/internal/cli.Date={{.Date}}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: holocron
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - docs/**/*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

@@ -1,0 +1,30 @@
+name: README images
+
+# Regenerates docs/images with VHS on demand. Download the "readme-images"
+# artifact, review it, and commit the files you want to keep.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install ttyd, ffmpeg and fonts (VHS downloads Chromium itself)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ttyd ffmpeg fonts-jetbrains-mono
+      - name: Install VHS (pinned; see docs/demo/README.md)
+        run: go install github.com/charmbracelet/vhs@v0.11.0
+      - name: Record
+        run: go run ./docs/demo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: readme-images
+          path: docs/images/
