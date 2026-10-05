@@ -3,8 +3,10 @@ package journal
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -590,5 +592,54 @@ func TestParseStoredTimeMatchesTimeParse(t *testing.T) {
 	// Lenient fallback still works.
 	if got, err := parseTime("2026-10-05T09:14:00+13:00"); err != nil || got.Hour() != 20 || got.Day() != 4 {
 		t.Errorf("RFC 3339 fallback = %v, %v", got, err)
+	}
+}
+
+// Repository paths must match however the directory is spelled: through a
+// symlink (macOS /var -> /private/var), an 8.3 short name or other letter
+// case on Windows. Git reports the resolved form.
+func TestProjectForPathCanonicalises(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	real := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(real, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Logf("symlinks unavailable (%v); skipping the symlink case", err)
+	} else {
+		p, err := s.CreateProject(ctx, NewProject{Name: "via-link", Paths: []string{link}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved, _ := filepath.EvalSymlinks(filepath.Join(real, "sub"))
+		got, ok, err := s.ProjectForPath(ctx, resolved)
+		if err != nil || !ok || got.ID != p.ID {
+			t.Fatalf("project registered through a symlink not found for %s: %v %v", resolved, ok, err)
+		}
+		if _, err := s.DeleteProject(ctx, "via-link"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		p, err := s.CreateProject(ctx, NewProject{Name: "case", Paths: []string{strings.ToUpper(real)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, ok, _ := s.ProjectForPath(ctx, strings.ToLower(filepath.Join(real, "sub"))); !ok || got.ID != p.ID {
+			t.Fatal("Windows paths should match regardless of letter case")
+		}
+		short := `C:\PROGRA~1`
+		if long, err := filepath.EvalSymlinks(short); err == nil && !strings.EqualFold(long, short) {
+			p, err := s.CreateProject(ctx, NewProject{Name: "short", Paths: []string{short}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, ok, _ := s.ProjectForPath(ctx, filepath.Join(long, "Some Tool")); !ok || got.ID != p.ID {
+				t.Fatalf("project registered by 8.3 name %s not found under %s", short, long)
+			}
+		}
 	}
 }

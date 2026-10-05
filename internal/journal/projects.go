@@ -343,7 +343,7 @@ func (s *Store) DeleteProject(ctx context.Context, nameOrAlias string) (int, err
 // ProjectForPath returns the project whose registered repository path
 // contains dir, preferring the most specific match.
 func (s *Store) ProjectForPath(ctx context.Context, dir string) (Project, bool, error) {
-	dir = cleanPath(dir)
+	dir = canonicalPath(dir)
 	rows, err := s.db.QueryContext(ctx, `SELECT project_id, value FROM project_links WHERE kind = 'path'`)
 	if err != nil {
 		return Project{}, false, database.Describe(err)
@@ -357,8 +357,8 @@ func (s *Store) ProjectForPath(ctx context.Context, dir string) (Project, bool, 
 			rows.Close()
 			return Project{}, false, err
 		}
-		if pathWithin(dir, v) && len(v) > bestLen {
-			bestID, bestLen = id, len(v)
+		if root := canonicalPath(v); pathWithin(dir, root) && len(root) > bestLen {
+			bestID, bestLen = id, len(root)
 		}
 	}
 	rows.Close()
@@ -528,4 +528,18 @@ func (s *Store) loadProjects(ctx context.Context, includeArchived bool) ([]Proje
 		}
 	}
 	return out, database.Describe(rows.Err())
+}
+
+// canonicalPath returns the absolute, symlink-resolved form of p so that two
+// spellings of one directory compare equal: on macOS /var is a symlink to
+// /private/var, and on Windows a directory may be reached through an 8.3
+// short name (C:\Users\RUNNER~1) or with different letter case. Git always
+// reports the resolved form, so repository paths must be compared this way.
+// When p does not exist, its cleaned absolute form is used.
+func canonicalPath(p string) string {
+	p = cleanPath(p)
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return p
 }
