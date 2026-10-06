@@ -633,8 +633,21 @@ func TestParsers(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(marks, []Mark{MarkImportant, MarkOneOnOne, MarkStaff}) {
 		t.Fatalf("ParseMarks = %v, %v", marks, err)
 	}
-	if id, uid, err := ParseRef(" #42 "); err != nil || id != 42 || uid != "" {
-		t.Fatalf("ParseRef = %d %q %v", id, uid, err)
+	for in, want := range map[string]EntryRef{"#42": {Num: 42}, "42": {Num: 42}, "#12a": {Num: 12, Label: "a"}, "12B": {Num: 12, Label: "b"}} {
+		if got, err := ParseRef(in); err != nil || got != want {
+			t.Errorf("ParseRef(%q) = %+v, %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"", "#", "0", "#-1", "a12", "12a3", "forty-two"} {
+		if r, err := ParseRef(bad); err == nil {
+			t.Errorf("ParseRef(%q) = %+v", bad, r)
+		}
+	}
+	if r, err := ParseRef("01J5ABCDEFGHJKMNPQRSTVWXYZ"); err != nil || r.UID != "01J5ABCDEFGHJKMNPQRSTVWXYZ" {
+		t.Errorf("ParseRef(UID) = %+v, %v", r, err)
+	}
+	if got := FormatRef(12, "a"); got != "#12a" {
+		t.Errorf("FormatRef = %q", got)
 	}
 	u := NewUID(time.Now())
 	if !IsUID(u) {

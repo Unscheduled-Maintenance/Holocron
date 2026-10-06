@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"time"
 
@@ -67,6 +66,7 @@ type jsonProject struct {
 type EntryJSON struct {
 	ID         int64           `json:"id"`
 	UID        string          `json:"uid"`
+	Ref        string          `json:"ref"`
 	OccurredAt time.Time       `json:"occurred_at"`
 	LocalTime  string          `json:"recorded_local_time"`
 	Body       string          `json:"body"`
@@ -195,8 +195,8 @@ func metaLine(e journal.Entry) string {
 		if e.Type.Opens() {
 			if e.ResolvedAt != nil {
 				t += " (resolved"
-				if e.ResolvedBy != 0 {
-					t += " by #" + strconv.FormatInt(e.ResolvedBy, 10)
+				if e.ResolvedByRef != "" {
+					t += " by " + e.ResolvedByRef
 				}
 				t += ")"
 			} else {
@@ -220,11 +220,7 @@ func metaLine(e journal.Entry) string {
 		parts = append(parts, "marks: "+strings.Join(ms, ", "))
 	}
 	if len(e.Resolves) > 0 {
-		refs := make([]string, len(e.Resolves))
-		for i, id := range e.Resolves {
-			refs[i] = "#" + strconv.FormatInt(id, 10)
-		}
-		parts = append(parts, "resolves: "+strings.Join(refs, ", "))
+		parts = append(parts, "resolves: "+strings.Join(e.ResolvesRefs, ", "))
 	}
 	if e.Source != nil {
 		src := "source: " + e.Source.Type + " " + e.Source.ID
@@ -280,7 +276,7 @@ func escape(s string) string {
 // NewEntryJSON converts an entry to its documented JSON form.
 func NewEntryJSON(e journal.Entry) EntryJSON {
 	je := EntryJSON{
-		ID: e.ID, UID: e.UID, OccurredAt: e.OccurredAt.UTC(),
+		ID: e.ID, UID: e.UID, Ref: e.Ref(), OccurredAt: e.OccurredAt.UTC(),
 		LocalTime: e.OccurredAt.In(e.RecordedOffset()).Format(time.RFC3339),
 		Body:      e.Body, Type: strPtr(string(e.Type)), Project: strPtr(e.Project),
 		Tags: nonNil(e.Tags), Marks: []string{}, Resolves: nonNil(e.Resolves),

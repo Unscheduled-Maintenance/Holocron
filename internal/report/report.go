@@ -237,6 +237,12 @@ func (b Builder) Build(ctx context.Context, kind Kind, opts Options) (Report, er
 				r.Entries[id] = pool[id]
 			}
 		}
+		// Omitted entries are only referenced, so their numbers can be shown.
+		for _, id := range s.OmittedIDs {
+			if e, ok := pool[id]; ok {
+				r.Entries[id] = e
+			}
+		}
 	}
 	return r, nil
 }
@@ -456,4 +462,18 @@ func (b Builder) linkResolutions(ctx context.Context, r *Report, pool map[int64]
 		}
 	}
 	return nil
+}
+
+// Refs returns the references (#42, #12a) of entries cited by the report,
+// in the order given.
+func (r Report) Refs(ids []int64) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		if e, ok := r.Entries[id]; ok && e.Num != 0 {
+			out[i] = e.Ref()
+		} else {
+			out[i] = fmt.Sprintf("#%d", id)
+		}
+	}
+	return out
 }

@@ -246,8 +246,12 @@ type Source struct {
 
 // Entry is one journal record.
 type Entry struct {
-	ID         int64
-	UID        string
+	ID  int64 // internal row ID; people see Num and Label
+	UID string
+	// Num and Label are the number people see: #42, or #12a for a number
+	// issued by device a.
+	Num        int64
+	Label      string
 	OccurredAt time.Time // the moment the work happened (UTC instant)
 	UTCOffset  int       // seconds east of UTC where the entry was recorded
 	Body       string
@@ -259,11 +263,15 @@ type Entry struct {
 	ResolvedAt *time.Time
 	// ResolvedBy is the entry that resolved this one, or 0.
 	ResolvedBy int64
+	// ResolvedByRef is ResolvedBy's reference (#57), or "".
+	ResolvedByRef string
 	// Resolves lists the entries this one resolved, in ID order.
-	Resolves  []int64
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Source    *Source
+	Resolves []int64
+	// ResolvesRefs holds the references of Resolves, in the same order.
+	ResolvesRefs []string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Source       *Source
 
 	// Snippet is set by text searches: a fragment of the body with matches
 	// wrapped in HighlightStart/HighlightEnd.
@@ -276,8 +284,14 @@ const (
 	HighlightEnd   = "\x02"
 )
 
-// Ref returns the short, human-friendly reference for an entry: "#42".
-func (e Entry) Ref() string { return fmt.Sprintf("#%d", e.ID) }
+// Ref returns the short, human-friendly reference for an entry: "#42", or
+// "#12a" for an entry numbered by device a.
+func (e Entry) Ref() string {
+	if e.Num == 0 {
+		return FormatRef(e.ID, "") // not loaded from an archive
+	}
+	return FormatRef(e.Num, e.Label)
+}
 
 // Title returns the first line of the body.
 func (e Entry) Title() string {

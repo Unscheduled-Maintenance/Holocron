@@ -109,17 +109,21 @@ Holocron imports a vendor SDK (ADR 0006).
   renames re-index affected entries. `holocron doctor` verifies the index;
   `--rebuild-index` regenerates it.
 
-### Schema (version 3)
+### Schema (version 4)
 
 | Table | Purpose |
 |---|---|
-| `entries` | `id` (AUTOINCREMENT, the `#42` number), `uid` (ULID), `occurred_at`, `utc_offset`, `body`, `type`, `project_id` → projects (SET NULL), `resolved_at`, `resolved_by` → the entry that resolved it (SET NULL; version 2), `created_at`, `updated_at`, provenance (`source_type`, `source_id`, `source_url`, `imported_at`; unique on type+id) |
+| `entries` | `id` (AUTOINCREMENT, internal), `uid` (ULID), `num` and `num_device` (the number people see: `#42`, or `#12a` for device `a`; unique together; version 4), `clocks` (per-field change clocks) and `dirty` (changed since last published) for sync (version 4), `occurred_at`, `utc_offset`, `body`, `type`, `project_id` → projects (SET NULL), `resolved_at`, `resolved_by` → the entry that resolved it (SET NULL; version 2), `created_at`, `updated_at`, provenance (`source_type`, `source_id`, `source_url`, `imported_at`; unique on type+id) |
 | `projects` | `id`, `uid`, `name` (unique, case-insensitive), `description`, `archived_at`, timestamps |
 | `project_aliases` | `alias` (unique, case-insensitive) → project |
 | `project_links` | repository `path`s and `url`s per project |
 | `tags`, `entry_tags` | reusable tags; unused tags are pruned |
 | `entry_marks` | report marks per entry (ADR 0005) |
 | `report_log` | reports recorded as sent (`--record`): `kind`, `range_start`, `range_end`, `recorded_at`; read by `--since last` (version 3) |
+| `devices` | this computer and, with sync, the others: `uid`, `label` (`a`, `b`, …), `is_self`, `next_num` (version 4) |
+| `tombstones` | deleted entries and projects (`uid`, `kind`, `clock`), so deletes reach other devices (version 4) |
+| `project_redirects` | old project UIDs merged into another project (version 4) |
+| `sync_meta` | small sync state: the plain-number counter and the last clock (version 4) |
 | `entries_fts` | FTS5 index (`unicode61`, diacritics removed) |
 | `schema_migrations` | applied migrations; mirrored in `PRAGMA user_version` |
 
@@ -131,7 +135,10 @@ constraints, so adding a type later does not require rebuilding a table.
 People type small integers (`#42`); exports and provenance use 26-character
 ULIDs. AUTOINCREMENT guarantees numbers are never reused within an archive,
 and `restore` carries the highest issued numbers forward so a restored
-backup cannot re-issue them either (ADR 0002).
+backup cannot re-issue them either (ADR 0002). With sync (ADR 0007), each
+device numbers its new entries under its own label (`#12a`, `#12b`), so
+numbers never collide between computers; the number is stored separately
+from the internal row ID.
 
 ## The TUI
 

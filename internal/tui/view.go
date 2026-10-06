@@ -375,8 +375,8 @@ func (m Model) detailText(e journal.Entry, width int) string {
 	if e.Type.Opens() {
 		if e.ResolvedAt != nil {
 			status := "resolved " + e.ResolvedAt.In(m.app.Loc).Format("2 Jan 2006")
-			if e.ResolvedBy != 0 {
-				status += fmt.Sprintf(" by #%d", e.ResolvedBy)
+			if e.ResolvedByRef != "" {
+				status += " by " + e.ResolvedByRef
 			}
 			row("Status", status)
 		} else {
@@ -384,11 +384,7 @@ func (m Model) detailText(e journal.Entry, width int) string {
 		}
 	}
 	if len(e.Resolves) > 0 {
-		refs := make([]string, len(e.Resolves))
-		for i, id := range e.Resolves {
-			refs[i] = fmt.Sprintf("#%d", id)
-		}
-		row("Resolves", strings.Join(refs, ", "))
+		row("Resolves", strings.Join(e.ResolvesRefs, ", "))
 	}
 	if len(e.Tags) > 0 {
 		tags := make([]string, len(e.Tags))

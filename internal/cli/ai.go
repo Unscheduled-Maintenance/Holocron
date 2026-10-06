@@ -36,7 +36,7 @@ func runAIReport(ctx context.Context, e *env, a *app.App, rep report.Report, f *
 	}
 	ids := rep.SourceIDs()
 	disclosure := fmt.Sprintf("This sends the full text of %d selected %s (%s) to %s.",
-		len(ids), plural(len(ids), "entry", "entries"), idList(ids), provider.Name())
+		len(ids), plural(len(ids), "entry", "entries"), idList(rep.Refs(ids)), provider.Name())
 	if !f.yes {
 		if !e.io.InTTY {
 			return false, usagef("%s Pass --yes to confirm non-interactively.", disclosure)
@@ -81,14 +81,14 @@ func renderDeterministic(e *env, a *app.App, rep report.Report, f *reportFlags) 
 	return writeOutput(e, f.output, buf.Bytes(), "report")
 }
 
-func idList(ids []int64) string {
-	parts := make([]string, 0, len(ids))
-	for i, id := range ids {
+func idList(refs []string) string {
+	parts := make([]string, 0, len(refs))
+	for i, ref := range refs {
 		if i == 10 {
-			parts = append(parts, fmt.Sprintf("+%d more", len(ids)-10))
+			parts = append(parts, fmt.Sprintf("+%d more", len(refs)-10))
 			break
 		}
-		parts = append(parts, fmt.Sprintf("#%d", id))
+		parts = append(parts, ref)
 	}
 	return strings.Join(parts, " ")
 }

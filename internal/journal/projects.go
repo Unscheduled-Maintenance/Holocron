@@ -98,6 +98,13 @@ func (s *Store) insertProject(ctx context.Context, q queryer, name string) (Proj
 		return Project{}, database.Describe(fmt.Errorf("creating project %q: %w", n, err))
 	}
 	id, _ := res.LastInsertId()
+	clock, err := s.tick(ctx, q)
+	if err != nil {
+		return Project{}, err
+	}
+	if err := touchProject(ctx, q, id, clock, ProjectFields...); err != nil {
+		return Project{}, err
+	}
 	return Project{ID: id, Name: n}, nil
 }
 
@@ -235,6 +242,7 @@ func (s *Store) UpdateProject(ctx context.Context, nameOrAlias string, p Project
 		id = cur.ID
 		now := formatTime(s.now())
 		renamed := false
+		var fields []string
 		if p.Name != nil {
 			n, err := NormalizeProjectName(*p.Name)
 			if err != nil {
@@ -246,12 +254,14 @@ func (s *Store) UpdateProject(ctx context.Context, nameOrAlias string, p Project
 			if _, err := tx.ExecContext(ctx, `UPDATE projects SET name = ?, updated_at = ? WHERE id = ?`, n, now, id); err != nil {
 				return database.Describe(err)
 			}
+			fields = append(fields, FieldName)
 			renamed = true
 		}
 		if p.Description != nil {
 			if _, err := tx.ExecContext(ctx, `UPDATE projects SET description = ?, updated_at = ? WHERE id = ?`, strings.TrimSpace(*p.Description), now, id); err != nil {
 				return database.Describe(err)
 			}
+			fields = append(fields, FieldDescription)
 		}
 		if p.Archived != nil {
 			var v sql.NullString
@@ -261,6 +271,7 @@ func (s *Store) UpdateProject(ctx context.Context, nameOrAlias string, p Project
 			if _, err := tx.ExecContext(ctx, `UPDATE projects SET archived_at = ?, updated_at = ? WHERE id = ?`, v, now, id); err != nil {
 				return database.Describe(err)
 			}
+			fields = append(fields, FieldArchived)
 		}
 		for _, a := range p.RemoveAliases {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM project_aliases WHERE project_id = ? AND alias = ?`, id, strings.TrimSpace(a)); err != nil {
@@ -291,6 +302,21 @@ func (s *Store) UpdateProject(ctx context.Context, nameOrAlias string, p Project
 		}
 		for _, v := range p.AddURLs {
 			if err := addLink(ctx, tx, id, "url", v); err != nil {
+				return err
+			}
+		}
+		if len(p.AddAliases)+len(p.RemoveAliases) > 0 {
+			fields = append(fields, FieldAliases)
+		}
+		if len(p.AddURLs)+len(p.RemoveURLs) > 0 {
+			fields = append(fields, FieldURLs)
+		}
+		if len(fields) > 0 {
+			clock, err := s.tick(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if err := touchProject(ctx, tx, id, clock, fields...); err != nil {
 				return err
 			}
 		}
@@ -326,6 +352,13 @@ func (s *Store) DeleteProject(ctx context.Context, nameOrAlias string) (int, err
 			ids = append(ids, id)
 		}
 		rows.Close()
+		clock, err := s.tick(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if err := bury(ctx, tx, "project", p.UID, clock); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, p.ID); err != nil {
 			return database.Describe(err)
 		}

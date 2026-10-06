@@ -37,11 +37,9 @@ func (o RenderOptions) timeLayout() string {
 	return o.TimeLayout
 }
 
-func refs(ids []int64) string {
-	parts := make([]string, len(ids))
-	for i, id := range ids {
-		parts[i] = fmt.Sprintf("#%d", id)
-	}
+// refs renders the references of entries cited by an item.
+func (r Report) refs(ids []int64) string {
+	parts := r.Refs(ids)
 	if len(parts) > 6 {
 		return strings.Join(parts[:6], " ") + fmt.Sprintf(" +%d", len(parts)-6)
 	}
@@ -97,7 +95,7 @@ func Text(w io.Writer, r Report, o RenderOptions) error {
 				b.WriteString(" " + st.Warn("[open]"))
 			}
 			if o.ShowIDs {
-				b.WriteString("  " + st.Faint(refs(it.EntryIDs)))
+				b.WriteString("  " + st.Faint(r.refs(it.EntryIDs)))
 			}
 			b.WriteString("\n")
 			if o.Explain && len(it.Reasons) > 0 {
@@ -107,7 +105,7 @@ func Text(w io.Writer, r Report, o RenderOptions) error {
 		if s.Omitted > 0 && !s.omittedInNote {
 			line := fmt.Sprintf("  + %d more not shown", s.Omitted)
 			if o.ShowIDs {
-				line += "  " + refs(s.OmittedIDs)
+				line += "  " + r.refs(s.OmittedIDs)
 			}
 			b.WriteString(st.Dim(line) + "\n")
 		}
@@ -182,7 +180,7 @@ func Markdown(w io.Writer, r Report, o RenderOptions) error {
 				b.WriteString(" **[open]**")
 			}
 			if o.ShowIDs {
-				b.WriteString(" (" + refs(it.EntryIDs) + ")")
+				b.WriteString(" (" + r.refs(it.EntryIDs) + ")")
 			}
 			b.WriteString("\n")
 			if o.Explain && len(it.Reasons) > 0 {
@@ -236,17 +234,19 @@ type jsonSection struct {
 }
 
 type jsonItem struct {
-	Text     string     `json:"text"`
-	Project  string     `json:"project,omitempty"`
-	Type     string     `json:"type,omitempty"`
-	Time     *time.Time `json:"occurred_at,omitempty"`
-	Open     bool       `json:"open,omitempty"`
-	EntryIDs []int64    `json:"entry_ids"`
-	Reasons  []string   `json:"reasons"`
+	Text      string     `json:"text"`
+	Project   string     `json:"project,omitempty"`
+	Type      string     `json:"type,omitempty"`
+	Time      *time.Time `json:"occurred_at,omitempty"`
+	Open      bool       `json:"open,omitempty"`
+	EntryIDs  []int64    `json:"entry_ids"`
+	EntryRefs []string   `json:"entry_refs"`
+	Reasons   []string   `json:"reasons"`
 }
 
 type jsonSource struct {
 	ID         int64     `json:"id"`
+	Ref        string    `json:"ref"`
 	UID        string    `json:"uid"`
 	OccurredAt time.Time `json:"occurred_at"`
 	Project    string    `json:"project,omitempty"`
@@ -274,7 +274,7 @@ func JSON(w io.Writer, r Report) error {
 	for _, s := range r.Sections {
 		js := jsonSection{Key: s.Key, Title: s.Title, Note: s.Note, Omitted: s.Omitted, OmittedIDs: s.OmittedIDs, Items: []jsonItem{}}
 		for _, it := range s.Items {
-			ji := jsonItem{Text: it.Text, Project: it.Project, Type: string(it.Type), Open: it.Open, EntryIDs: it.EntryIDs, Reasons: it.Reasons}
+			ji := jsonItem{Text: it.Text, Project: it.Project, Type: string(it.Type), Open: it.Open, EntryIDs: it.EntryIDs, EntryRefs: r.Refs(it.EntryIDs), Reasons: it.Reasons}
 			if !it.Time.IsZero() {
 				t := it.Time.UTC()
 				ji.Time = &t
@@ -291,7 +291,7 @@ func JSON(w io.Writer, r Report) error {
 		if !ok {
 			continue
 		}
-		out.Sources = append(out.Sources, jsonSource{ID: e.ID, UID: e.UID, OccurredAt: e.OccurredAt.UTC(), Project: e.Project, Type: string(e.Type), Body: e.Body})
+		out.Sources = append(out.Sources, jsonSource{ID: e.ID, Ref: e.Ref(), UID: e.UID, OccurredAt: e.OccurredAt.UTC(), Project: e.Project, Type: string(e.Type), Body: e.Body})
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
