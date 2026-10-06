@@ -16,6 +16,7 @@ import (
 
 	"github.com/Unscheduled-Maintenance/Holocron/internal/app"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/database"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/devsync"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/journal"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/style"
 )
@@ -79,8 +80,11 @@ type env struct {
 	launchTUI func(ctx context.Context, e *env) error
 }
 
+// keychain overrides the OS keychain for sync keys; tests set it.
+var keychain devsync.Keychain
+
 func (e *env) appOptions() app.Options {
-	return app.Options{ConfigPath: e.g.config, DBPath: e.g.db, UTC: e.g.utc}
+	return app.Options{ConfigPath: e.g.config, DBPath: e.g.db, UTC: e.g.utc, Keychain: keychain}
 }
 
 // open returns the application, opening the archive on first use.
@@ -96,11 +100,35 @@ func (e *env) open(ctx context.Context) (*app.App, error) {
 	return a, nil
 }
 
-func (e *env) close() {
+// openNoSync opens the archive without the automatic sync, for the sync
+// commands themselves.
+func (e *env) openNoSync(ctx context.Context) (*app.App, error) {
 	if e.app != nil {
-		_ = e.app.Close()
-		e.app = nil
+		return e.app, nil
 	}
+	opts := e.appOptions()
+	opts.NoSync = true
+	a, err := app.Open(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	e.app = a
+	return a, nil
+}
+
+// close publishes this computer's changes when sync is set up, reports any
+// sync problems, and closes the archive.
+func (e *env) close() {
+	if e.app == nil {
+		return
+	}
+	e.app.SyncPush(context.Background())
+	es := e.errStyle()
+	for _, n := range e.app.SyncNotes() {
+		fmt.Fprintf(e.io.Err, "%s %s\n", es.Warn("holocron:"), n)
+	}
+	_ = e.app.Close()
+	e.app = nil
 }
 
 // out returns a styler for stdout.
@@ -194,7 +222,7 @@ Run holocron with no arguments in a terminal to open the interactive archive.`,
 	add("entries", newEditCmd(e), newDeleteCmd(e), newMarkCmd(e, false), newMarkCmd(e, true), newResolveCmd(e),
 		newProjectCmd(e), newTagCmd(e))
 	add("reports", newReportCmd(e), newExportCmd(e), newImportCmd(e))
-	add("archive", newBackupCmd(e), newRestoreCmd(e), newConfigCmd(e), newDoctorCmd(e), newTUICmd(e), newVersionCmd(e))
+	add("archive", newBackupCmd(e), newRestoreCmd(e), newConfigCmd(e), newDoctorCmd(e), newSyncCmd(e), newTUICmd(e), newVersionCmd(e))
 	return root, e
 }
 

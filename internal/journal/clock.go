@@ -346,3 +346,111 @@ func (s *Store) EntryClocks(ctx context.Context, id int64) (Clocks, error) {
 	}
 	return decodeClocks(raw), nil
 }
+
+// Meta returns a small piece of stored state, or "" when unset.
+func (s *Store) Meta(ctx context.Context, key string) (string, error) { return meta(ctx, s.db, key) }
+
+// SetMeta stores a small piece of state.
+func (s *Store) SetMeta(ctx context.Context, key, value string) error {
+	return setMeta(ctx, s.db, key, value)
+}
+
+// NumberOwnEntries gives every plain-numbered entry this device's label,
+// keeping its digits: #3 becomes #3b. A computer joining an existing sync
+// set does this before merging, so its own entries cannot collide with the
+// set's plain numbers. Entries whose UIDs are in skip (already in the set)
+// keep their plain numbers. It returns the old and new references.
+func (s *Store) NumberOwnEntries(ctx context.Context, skip map[string]bool) ([]Renumbered, error) {
+	var out []Renumbered
+	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
+		self, err := s.self(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if self.Label == "" {
+			return fmt.Errorf("%w: this device has no sync label yet", ErrInvalid)
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT id, uid, num FROM entries WHERE num_device IS NULL ORDER BY num`)
+		if err != nil {
+			return database.Describe(err)
+		}
+		type row struct {
+			id  int64
+			uid string
+			num int64
+		}
+		var list []row
+		for rows.Next() {
+			var r row
+			if err := rows.Scan(&r.id, &r.uid, &r.num); err != nil {
+				rows.Close()
+				return database.Describe(err)
+			}
+			list = append(list, r)
+		}
+		rows.Close()
+		next := self.NextNum
+		for _, r := range list {
+			if skip[r.uid] {
+				continue // the sync set already has it, with this number
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE entries SET num_device = ?, dirty = 1 WHERE id = ?`, self.ID, r.id); err != nil {
+				return database.Describe(err)
+			}
+			out = append(out, Renumbered{UID: r.uid, From: FormatRef(r.num, ""), To: FormatRef(r.num, self.Label)})
+			next = max(next, r.num+1)
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE devices SET next_num = ? WHERE id = ?`, next, self.ID)
+		return database.Describe(err)
+	})
+	return out, err
+}
+
+// SkipPlainNumbers moves this device's labelled counter past every plain
+// number, so a plain number above the plain range always means this
+// device's own entry (ADR 0007).
+func (s *Store) SkipPlainNumbers(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE devices SET next_num = max(next_num,
+		coalesce((SELECT max(num) FROM entries WHERE num_device IS NULL), 0) + 1) WHERE is_self = 1`)
+	return database.Describe(err)
+}
+
+// Relabel changes this device's label, for when two devices ended up with
+// the same one. Entries it numbered are then shown with the new label
+// everywhere: other devices pick the label up from the device record.
+func (s *Store) Relabel(ctx context.Context, label string) (Device, error) {
+	if !labelRe.MatchString(label) {
+		return Device{}, fmt.Errorf("%w: device label %q must be lower-case letters", ErrInvalid, label)
+	}
+	var d Device
+	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
+		self, err := s.self(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if other, err := deviceWhere(ctx, tx, `label = ?`, label); err == nil && other.ID != self.ID {
+			return fmt.Errorf("%w: label %q belongs to another device", ErrConflict, label)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE devices SET label = ? WHERE id = ?`, label, self.ID); err != nil {
+			return database.Describe(err)
+		}
+		d, err = s.self(ctx, tx)
+		return err
+	})
+	return d, err
+}
+
+// Pending counts records changed here and not yet published.
+func (s *Store) Pending(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT
+		(SELECT count(*) FROM entries WHERE dirty = 1) + (SELECT count(*) FROM projects WHERE dirty = 1) +
+		(SELECT count(*) FROM tombstones WHERE dirty = 1) + (SELECT count(*) FROM report_log WHERE dirty = 1)`).Scan(&n)
+	return n, database.Describe(err)
+}
+
+// SetDeviceName records this computer's display name.
+func (s *Store) SetDeviceName(ctx context.Context, name string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE devices SET name = ? WHERE is_self = 1`, name)
+	return database.Describe(err)
+}

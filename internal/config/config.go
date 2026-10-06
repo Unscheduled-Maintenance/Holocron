@@ -50,6 +50,7 @@ type Config struct {
 	TUI     TUIConfig     `toml:"tui"`
 	Git     GitConfig     `toml:"git"`
 	AI      AIConfig      `toml:"ai"`
+	Sync    SyncConfig    `toml:"sync"`
 }
 
 // CaptureConfig controls `holocron add`.
@@ -86,6 +87,21 @@ type GitConfig struct {
 	// AuthorEmails are additional emails that identify the user's commits.
 	AuthorEmails []string `toml:"author_emails"`
 }
+
+// SyncConfig controls multi-device sync (docs/adr/0007-multi-device-sync.md).
+// Where an archive syncs is kept in the archive itself, set by
+// `holocron sync init` or `join`; these are this computer's preferences.
+type SyncConfig struct {
+	// KeyCommand prints the sync key, for example from a password manager:
+	// "op read op://Private/Holocron/sync-key". It runs only when the OS
+	// keychain does not have the key.
+	KeyCommand string `toml:"key_command"`
+	// Auto pulls before and publishes after every command. Default true.
+	Auto *bool `toml:"auto"`
+}
+
+// SyncAutoEnabled reports whether commands sync automatically.
+func (c Config) SyncAutoEnabled() bool { return c.Sync.Auto == nil || *c.Sync.Auto }
 
 // AIConfig selects an optional AI provider. API keys are never stored here.
 type AIConfig struct {
@@ -353,6 +369,10 @@ const Template = `# Holocron configuration.
 
 [git]
 # author_emails = ["me@example.com"]   # in addition to git's user.email
+
+[sync]
+# key_command = "op read op://Private/Holocron/sync-key"   # prints the sync key when the keychain lacks it
+# auto = true               # sync before and after every command (set up with "holocron sync init" or "join")
 
 [ai]
 # provider = "anthropic"                 # empty disables AI; nothing is sent anywhere

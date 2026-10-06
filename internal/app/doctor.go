@@ -14,6 +14,7 @@ import (
 
 	"github.com/Unscheduled-Maintenance/Holocron/internal/config"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/database"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/devsync"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/editor"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/journal"
 )
@@ -76,6 +77,7 @@ func Doctor(ctx context.Context, opts Options, dopts DoctorOptions) []Check {
 		add("database", CheckWarn, "no archive yet; it will be created by the first command that needs it")
 	} else {
 		checks = append(checks, checkDatabase(ctx, paths, dopts)...)
+		checks = append(checks, checkSync(ctx, cfg, paths, opts)...)
 	}
 
 	if argv, src, err := editor.Resolve(cfg.Editor); err != nil {
@@ -195,4 +197,42 @@ func checkDatabase(ctx context.Context, paths config.Paths, dopts DoctorOptions)
 		add("backups", CheckOK, "%d in %s (latest %s)", len(backups), paths.BackupDir, filepath.Base(latest))
 	}
 	return checks
+}
+
+// checkSync reports on multi-device sync. It never runs sync.key_command
+// and never changes the sync folder.
+func checkSync(ctx context.Context, cfg config.Config, paths config.Paths, opts Options) []Check {
+	db, err := database.Open(ctx, paths.Database, database.Options{NoMigrate: true, MustExist: true})
+	if err != nil {
+		return nil // reported by the database checks
+	}
+	defer db.Close()
+	keychain := opts.Keychain
+	if keychain == nil {
+		keychain = devsync.SystemKeychain{}
+	}
+	s := &devsync.Syncer{Store: journal.NewStore(db), Keychain: keychain, KeyCommand: editor.SplitCommand(cfg.Sync.KeyCommand)}
+	st, err := s.Status(ctx)
+	switch {
+	case errors.Is(err, devsync.ErrNotConfigured):
+		return []Check{{Name: "sync", Status: CheckInfo, Detail: "not set up (see `holocron sync --help`)"}}
+	case err != nil:
+		// An archive from before sync existed has nothing to report.
+		return []Check{{Name: "sync", Status: CheckInfo, Detail: "not set up"}}
+	case st.Problem != "":
+		return []Check{{Name: "sync", Status: CheckFail, Detail: st.Problem}}
+	case st.Locked:
+		return []Check{{Name: "sync", Status: CheckWarn, Detail: fmt.Sprintf("device %s, but the key is not available here; run `holocron sync unlock`", st.Label)}}
+	}
+	detail := fmt.Sprintf("device %s with %d %s in %s", st.Label, len(st.Devices), map[bool]string{true: "computer", false: "computers"}[len(st.Devices) == 1], st.Folder)
+	if st.Pending > 0 {
+		detail += fmt.Sprintf("; %d %s waiting to be published", st.Pending, map[bool]string{true: "change", false: "changes"}[st.Pending == 1])
+	}
+	if st.KeyCommand {
+		detail += "; key from sync.key_command when the keychain lacks it"
+	}
+	if !cfg.SyncAutoEnabled() {
+		detail += "; automatic sync is off (sync.auto = false)"
+	}
+	return []Check{{Name: "sync", Status: CheckOK, Detail: detail}}
 }

@@ -36,6 +36,7 @@ it into deterministic reports that always show which entries they came from.
 - [The interactive archive (TUI)](#the-interactive-archive-tui)
 - [Export and import](#export-and-import)
 - [Backup and restore](#backup-and-restore)
+- [Sync between computers](#sync-between-computers)
 - [Git import](#git-import)
 - [AI-assisted reports (optional)](#ai-assisted-reports-optional)
 - [Configuration and storage locations](#configuration-and-storage-locations)
@@ -548,6 +549,90 @@ cannot open it:
 4. Restore the most recent good backup with `holocron restore`, or point
    Holocron at a copy with `--db`.
 
+## Sync between computers
+
+Sync keeps one archive in step across computers, such as a work laptop and a
+personal one, through a folder that a sync service already copies between
+them: OneDrive, Dropbox, iCloud Drive or a network share. There is no Holocron
+server and no account.
+
+```bash
+holocron sync init ~/OneDrive/Holocron   # on the first computer
+holocron sync join ~/OneDrive/Holocron   # on each of the others
+```
+
+`init` prints a **sync key** once. Keep it in your password manager; `join`
+asks for it.
+
+Once set up, there is nothing to remember. Every command merges what the other
+computers published before it starts, and publishes this computer's changes
+when it finishes. The interactive archive also publishes after each change.
+Each computer keeps a complete archive and works offline: changes made while
+offline are published by the first command run once the folder is back. Run
+`holocron sync` to sync now and see what came in.
+
+**Conflicts resolve themselves.** Each field of an entry (text, time, type,
+project, tags, marks, resolution) is merged on its own, and the most recent
+change wins, so editing the tags on one computer and the text on the other
+keeps both edits. A delete wins over older changes, and undoing a delete
+syncs too. Projects with the same name made separately are merged into one.
+
+**Numbers stay unambiguous.** Each computer gets a letter, and new entries
+are numbered with it: `#12a` on the first computer, `#12b` on the second, so
+a number means the same entry everywhere. Entries from before sync keep their
+plain numbers (`#42`). Typing `12` finds this computer's `#12a` when there is
+no plain `#12`. When a computer joins, entries already in its archive take its
+letter and keep their digits (`#3` becomes `#3b`).
+
+**Encryption.** Everything in the sync folder except a small format marker is
+encrypted with [age](https://age-encryption.org) using the sync key. The
+folder shows only how many computers there are and when they last changed
+something. Your archive itself is not encrypted, as before.
+
+The key is unlocked once per computer and kept in its keychain (Windows
+Credential Manager, the macOS Keychain, or the Secret Service on Linux). Other
+ways to unlock it:
+
+| How | Set up | Join or unlock with |
+|---|---|---|
+| The key itself | printed by `init`, or `holocron sync key show` | `join` (asks for it) or `--key` |
+| A password manager | `[sync] key_command = "op read op://Private/Holocron/sync-key"` in the config | used automatically when the keychain lacks the key |
+| A passphrase | `init --passphrase`, or `holocron sync key passphrase` | `--passphrase` |
+| An SSH key | `init --ssh-key ~/.ssh/id_ed25519.pub`, or `holocron sync key ssh FILE` | `--ssh-key ~/.ssh/id_ed25519` |
+
+The SSH option needs the private key file on disk. Agents that never release
+the private key, such as 1Password's SSH agent, cannot unlock it. Use
+`key_command` with those. Where no keychain is available, Holocron runs
+`key_command` each time, or asks you to run `holocron sync unlock`. It never
+writes the key to a plain file.
+
+| Command | What it does |
+|---|---|
+| `holocron sync status` | The folder, the computers in it, when each last published, and what is waiting here. |
+| `holocron sync unlock` | Unlock again, for example after the key was replaced elsewhere. |
+| `holocron sync key rotate` | Replace the key (re-add `--passphrase` / `--ssh-key`); other computers then run `unlock`. |
+| `holocron sync compact` | Fold this computer's change files into one snapshot (also done daily or after 50 changes). |
+| `holocron sync relabel` | Take a new letter if two computers ended up with the same one; sync says when. |
+| `holocron sync off` | Stop syncing this archive. Nothing is deleted. |
+
+Things to know:
+
+- **Ask before syncing work notes.** Syncing work notes through a personal
+  cloud folder, or onto a personal computer, may be against your employer's
+  rules.
+- **Keep the folder on the device.** OneDrive "Files On-Demand" can leave
+  files in the cloud only, and they can't be read offline. Mark the folder
+  *Always keep on this device*. Holocron skips a file it can't read yet and
+  tries again on the next command.
+- **Changes travel when the sync service runs.** A change made just before a
+  computer shuts down while offline reaches the others only after it is next
+  online. `holocron sync status` shows when each computer last published.
+- **Some things stay on each computer.** The configuration, backups and
+  projects' repository paths are not synced.
+
+The design is recorded in [ADR 0007](docs/adr/0007-multi-device-sync.md) and the folder
+format in [docs/sync-format.md](docs/sync-format.md).
+
 ## Git import
 
 ```bash
@@ -660,6 +745,10 @@ default_range = "this-week"
 [git]
 author_emails = ["me@example.com"]
 
+[sync]
+key_command = ""             # prints the sync key, e.g. "op read op://Private/Holocron/sync-key"
+auto = true                  # sync before and after every command
+
 [ai]
 provider = ""                # "anthropic" to enable --ai
 model = ""
@@ -740,6 +829,9 @@ Exit codes:
 - Data leaves your machine only when you run `holocron report … --ai` with a
   configured provider, and only the entries that report selected, after you
   confirm. Git import runs your local `git` and makes no network calls.
+- With [sync](#sync-between-computers) set up, encrypted copies of your
+  entries are written to the folder you chose; whatever service syncs that
+  folder carries them. Holocron itself still makes no network calls.
 - **The archive is not encrypted.** It is a plain SQLite file created with
   owner-only permissions (0600 on macOS/Linux; on Windows it inherits your
   profile's ACLs). Protect it with full-disk encryption (BitLocker, FileVault,

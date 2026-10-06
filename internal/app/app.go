@@ -11,10 +11,13 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Unscheduled-Maintenance/Holocron/internal/config"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/database"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/devsync"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/editor"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/export"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/journal"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/report"
@@ -29,6 +32,11 @@ type Options struct {
 	UTC bool
 	// Now overrides the clock (tests).
 	Now func() time.Time
+	// NoSync skips the automatic sync when the archive opens (used by the
+	// sync commands themselves).
+	NoSync bool
+	// Keychain overrides the OS keychain for sync keys (tests).
+	Keychain devsync.Keychain
 }
 
 // App is an open Holocron archive plus its configuration.
@@ -38,10 +46,16 @@ type App struct {
 	DB     *database.DB
 	Store  *journal.Store
 	Loc    *time.Location
+	// Sync keeps the archive in step with other computers, when set up.
+	Sync *devsync.Syncer
 
 	now       func() time.Time
 	weekStart time.Weekday
 	types     journal.TypeAliases
+
+	syncMu     sync.Mutex
+	syncPaused bool
+	syncNotes  []string
 }
 
 // LoadConfig reads configuration without opening the database.
@@ -60,7 +74,11 @@ func Open(ctx context.Context, opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newApp(cfg, paths, db, opts), nil
+	a := newApp(cfg, paths, db, opts)
+	if !opts.NoSync && cfg.SyncAutoEnabled() {
+		a.pull(ctx)
+	}
+	return a, nil
 }
 
 func newApp(cfg config.Config, paths config.Paths, db *database.DB, opts Options) *App {
@@ -77,6 +95,11 @@ func newApp(cfg config.Config, paths config.Paths, db *database.DB, opts Options
 	types, _ := journal.NewTypeAliases(cfg.TypeAliases)
 	a := &App{Config: cfg, Paths: paths, DB: db, Loc: loc, now: now, weekStart: ws, types: types}
 	a.Store = journal.NewStore(db, journal.WithClock(now), journal.WithLocation(loc))
+	keychain := opts.Keychain
+	if keychain == nil {
+		keychain = devsync.SystemKeychain{}
+	}
+	a.Sync = &devsync.Syncer{Store: a.Store, Keychain: keychain, KeyCommand: editor.SplitCommand(cfg.Sync.KeyCommand), Now: now}
 	return a
 }
 
@@ -303,4 +326,53 @@ func (a *App) ImportJSON(ctx context.Context, r io.Reader, dryRun bool) (ImportR
 	}
 	res.ApplyResult, err = a.Store.Apply(ctx, recs, journal.ApplyOptions{})
 	return res, err
+}
+
+// pull merges other computers' changes when sync is set up. Problems never
+// stop the command: they are kept for SyncNotes, and a sync that cannot run
+// at all is paused for the rest of the process.
+func (a *App) pull(ctx context.Context) {
+	a.syncMu.Lock()
+	defer a.syncMu.Unlock()
+	res, err := a.Sync.Pull(ctx)
+	if errors.Is(err, devsync.ErrNotConfigured) {
+		a.syncPaused = true
+		return
+	}
+	if err != nil {
+		a.syncPaused = true
+		a.note("sync is paused: %v", err)
+		return
+	}
+	for _, w := range append(res.Warnings, res.Applied.Warnings...) {
+		a.note("sync: %s", w)
+	}
+}
+
+// SyncPush publishes this computer's changes when sync is set up. Like
+// pull, problems become SyncNotes.
+func (a *App) SyncPush(ctx context.Context) {
+	a.syncMu.Lock()
+	defer a.syncMu.Unlock()
+	if a.syncPaused || !a.Config.SyncAutoEnabled() {
+		return
+	}
+	if _, err := a.Sync.Push(ctx); err != nil && !errors.Is(err, devsync.ErrNotConfigured) {
+		a.syncPaused = true
+		a.note("sync could not publish this computer's changes (they are kept and will be published later): %v", err)
+	}
+}
+
+// SyncNotes returns sync problems met so far, each once.
+func (a *App) SyncNotes() []string {
+	a.syncMu.Lock()
+	defer a.syncMu.Unlock()
+	return slices.Clone(a.syncNotes)
+}
+
+func (a *App) note(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if !slices.Contains(a.syncNotes, msg) {
+		a.syncNotes = append(a.syncNotes, msg)
+	}
 }

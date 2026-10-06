@@ -170,3 +170,24 @@ A future importer needs only to produce `journal.NewEntry` values with a
 `Source`; deduplication, provenance display, export and reporting already
 work for any source type. No generic importer framework exists until a second
 source justifies one.
+
+## Sync
+
+`internal/devsync` keeps an archive in step with other computers through a
+shared folder ([ADR 0007](adr/0007-multi-device-sync.md),
+[format](sync-format.md)). It never talks to a network itself; a sync
+service moves the folder's files.
+
+- The journal provides the pieces: per-field clocks and tombstones kept by
+  every write path, `Store.ReadRecords` (all records, or only those changed
+  here), `Store.Apply` (a deterministic, idempotent per-field merge in one
+  transaction), and `Store.MarkPublished`. `holocron import json` uses the
+  same merge on an export file.
+- `devsync.Syncer` writes this computer's changes as age-encrypted files in
+  its own directory, merges other computers' new files, compacts, and manages
+  the key: a keychain cache, `sync.key_command`, passphrase and SSH unlock
+  files.
+- `app.Open` pulls before a command runs and `env.close` publishes after it
+  (the TUI publishes after each change). Sync problems never fail a command:
+  they are reported once and sync pauses for that process. The sync commands
+  open the archive without the automatic pull.
