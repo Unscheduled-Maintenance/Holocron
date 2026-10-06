@@ -22,6 +22,15 @@ holocron-*.json
 .env
 .env.*
 config.local.toml
+holocron-sync/
+*.age
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ecdsa*
+id_ed25519*
 
 # Editors and OS files
 .vscode/

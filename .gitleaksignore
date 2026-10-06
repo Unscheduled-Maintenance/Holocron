@@ -1,0 +1,5 @@
+# Known false positives for the gitleaks job in .github/workflows/ci.yml.
+# Each line is a fingerprint from `gitleaks git -v`.
+
+# A deliberately invalid sync key used to test that unlocking rejects it.
+fc4efa8da4ed7cd8982e57d271b742316a37a134:internal/devsync/sync_test.go:generic-api-key:255
