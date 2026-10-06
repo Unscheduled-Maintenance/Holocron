@@ -67,3 +67,23 @@ jobs:
           GOOS: ${{ matrix.target.goos }}
           GOARCH: ${{ matrix.target.goarch }}
         run: go build -trimpath -o dist/ ./cmd/holocron
+
+  # A single check for branch protection to require. It depends on every
+  # other job and fails unless all of them succeeded, so renaming a job or
+  # changing the build matrix never silently changes what is required.
+  ci:
+    if: always()
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All CI jobs succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != "success" ]; then
+              echo "::error::A required CI job did not succeed ($r)."
+              exit 1
+            fi
+          done
