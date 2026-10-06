@@ -12,8 +12,8 @@ jobs:
   record:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Install ttyd, ffmpeg and fonts (VHS downloads Chromium itself)
@@ -24,7 +24,7 @@ jobs:
         run: go install github.com/charmbracelet/vhs@v0.11.0
       - name: Record
         run: go run ./docs/demo
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: readme-images
           path: docs/images/
