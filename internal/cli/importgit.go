@@ -20,7 +20,7 @@ func newImportCmd(e *env) *cobra.Command {
 		Use:   "import",
 		Short: "Import records from other sources",
 	}
-	cmd.AddCommand(newImportGitCmd(e))
+	cmd.AddCommand(newImportGitCmd(e), newImportJSONCmd(e))
 	return cmd
 }
 

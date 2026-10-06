@@ -618,3 +618,55 @@ func TestReportSinceLast(t *testing.T) {
 	h.ok("report", "staff", "--range", "2026-Q1")
 	mustContain(t, h.ok("report", "staff", "--since", "last"), "February release")
 }
+
+func TestImportJSON(t *testing.T) {
+	h := newHarness(t)
+	h.ok("add", "Follow-up: ask about ARM capacity +infra #arm")
+	h.ok("add", "Shipped the exporter +infra", "--type", "accomplishment", "--mark", "staff")
+	h.ok("add", "ARM approved", "--resolves", "1")
+	h.ok("project", "edit", "infra", "--alias", "inf")
+	file := filepath.Join(h.dir, "export.json")
+	h.ok("export", "--format", "json", "-o", file)
+
+	other := filepath.Join(h.dir, "other.db")
+	in := func(args ...string) string { return h.ok(append([]string{"--db", other}, args...)...) }
+	in("add", "Something already here")
+
+	dry := in("import", "json", file, "--dry-run")
+	mustContain(t, dry, "Would add 3 entries and 1 project", "Would renumber", "#1 → #4")
+	mustNotContain(t, in("list"), "ARM approved")
+
+	r := h.run("--db", other, "import", "json", file)
+	if r.code != 0 {
+		t.Fatalf("import: %+v", r)
+	}
+	mustContain(t, r.out, "Added 3 entries and 1 project", "#1 → #4")
+	mustContain(t, r.err, "Backup of the archive before importing")
+	mustContain(t, in("show", "4"), "ask about ARM capacity", "infra", "resolved", "by #3")
+	mustContain(t, in("show", "3"), "Resolves", "#4")
+	mustContain(t, in("search", "+inf"), "Shipped the exporter")
+	mustContain(t, in("show", "1"), "Something already here")
+
+	// Importing again changes nothing; a newer edit here survives an older file.
+	in("edit", "2", "--text", "Shipped the exporter (edited later)")
+	mustContain(t, in("import", "json", file), "Nothing to import")
+	mustContain(t, in("show", "2"), "edited later")
+	in("delete", "3", "--yes")
+	mustContain(t, in("import", "json", file), "Nothing to import", "Skipped 1 entry deleted here")
+
+	var summary struct {
+		DryRun  bool           `json:"dry_run"`
+		Entries map[string]int `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(in("import", "json", file, "--dry-run", "--json")), &summary); err != nil || !summary.DryRun || summary.Entries["skipped"] != 1 {
+		t.Fatalf("--json summary = %+v, %v", summary, err)
+	}
+	// The original archive imports its own export as a no-op.
+	mustContain(t, h.ok("import", "json", file), "Nothing to import")
+
+	bad := filepath.Join(h.dir, "bad.json")
+	_ = os.WriteFile(bad, []byte(`{"format": "something/v9"}`), 0o600)
+	if r := h.run("import", "json", bad); r.code == 0 || !strings.Contains(r.err, "unsupported export format") {
+		t.Fatalf("bad format: %+v", r)
+	}
+}

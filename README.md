@@ -34,7 +34,7 @@ it into deterministic reports that always show which entries they came from.
 - [Projects and tags](#projects-and-tags)
 - [Reports](#reports)
 - [The interactive archive (TUI)](#the-interactive-archive-tui)
-- [Export](#export)
+- [Export and import](#export-and-import)
 - [Backup and restore](#backup-and-restore)
 - [Git import](#git-import)
 - [AI-assisted reports (optional)](#ai-assisted-reports-optional)
@@ -474,7 +474,7 @@ Active filters are always written out in the header (`project: AWS`,
 `tag: #security`), the selected row has a `▌` marker, and open items say
 `open`, so nothing depends on colour alone.
 
-## Export
+## Export and import
 
 ```bash
 holocron export --format markdown -o holocron.md
@@ -492,6 +492,24 @@ Export accepts every listing filter. Entries are written oldest first.
   documented in [docs/export-format.md](docs/export-format.md). Times are UTC
   RFC 3339, and each entry also records the local time it was captured. The
   same entry shape is used by every `--json` option.
+
+### Importing a JSON export
+
+```bash
+holocron import json laptop.json --dry-run  # see what would change
+holocron import json laptop.json
+```
+
+`import json` merges a JSON export into the archive, for example to bring
+entries over from another computer or to recover part of an archive.
+Entries and projects are matched on their UIDs, so importing the same file
+twice changes nothing. Where a record exists on both sides, each field keeps
+whichever version changed most recently; entries deleted here after the
+export was made stay deleted; projects with the same name are merged. An
+imported entry whose number is already used here by a different entry gets
+the next free number, and the change is listed. A verified backup is taken
+before anything changes. Repository paths are not imported, because they
+belong to the computer that made the export.
 
 ## Backup and restore
 

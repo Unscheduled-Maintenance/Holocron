@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"time"
@@ -273,4 +274,33 @@ func splitRefs(in []string) []string {
 		}
 	}
 	return out
+}
+
+// ImportResult reports what a JSON import did (or, for a dry run, would do).
+type ImportResult struct {
+	journal.ApplyResult
+	// Backup is the archive backup taken before importing; empty for a dry
+	// run or when nothing would change.
+	Backup string
+}
+
+// ImportJSON merges a JSON export into the archive: entries and projects are
+// matched on their UIDs, the most recent change to each field wins, and
+// importing the same file again changes nothing. A verified backup is taken
+// first, unless this is a dry run or the import changes nothing.
+func (a *App) ImportJSON(ctx context.Context, r io.Reader, dryRun bool) (ImportResult, error) {
+	recs, err := export.ReadJSON(r)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	preview, err := a.Store.Apply(ctx, recs, journal.ApplyOptions{DryRun: true})
+	if err != nil || dryRun || !preview.Changed() {
+		return ImportResult{ApplyResult: preview}, err
+	}
+	var res ImportResult
+	if res.Backup, _, err = a.Backup(ctx, ""); err != nil {
+		return ImportResult{}, fmt.Errorf("refusing to import without a backup of the archive: %w", err)
+	}
+	res.ApplyResult, err = a.Store.Apply(ctx, recs, journal.ApplyOptions{})
+	return res, err
 }

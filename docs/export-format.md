@@ -7,6 +7,11 @@ recognise.
 
 All timestamps are RFC 3339 in UTC unless the field name says otherwise.
 
+`holocron import json FILE` reads `holocron.export/v1` files back, merging them
+into an archive by UID (see the README). It uses `uid`, `ref` (or `id` for
+files without one), the entry fields, `resolved_by`, and projects by name and
+UID; `repository_paths` are not imported.
+
 ## Archive export — `holocron.export/v1`
 
 Produced by `holocron export --format json`.

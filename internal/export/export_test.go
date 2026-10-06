@@ -80,3 +80,42 @@ func TestMarkdownExport(t *testing.T) {
 		}
 	}
 }
+
+func TestReadJSONRoundTrip(t *testing.T) {
+	a := sample()
+	a.Entries[1].Num, a.Entries[1].Label = 7, "b"
+	a.Entries[1].ResolvedBy = 1
+	var buf bytes.Buffer
+	if err := JSON(&buf, a); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := ReadJSON(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs.Projects) != 1 || recs.Projects[0].UID != "P1" || recs.Projects[0].Aliases[0] != "amazon" {
+		t.Fatalf("projects = %+v", recs.Projects)
+	}
+	if len(recs.Entries) != 2 {
+		t.Fatalf("entries = %+v", recs.Entries)
+	}
+	first, second := recs.Entries[0], recs.Entries[1]
+	if first.Ref() != "#1" || first.UTCOffset != 13*3600 || first.Project != "P1" || first.Marks[0] != journal.MarkStaff ||
+		first.Clocks[journal.FieldBody] != journal.ClockFromTime(a.Entries[0].UpdatedAt) {
+		t.Errorf("first = %+v", first)
+	}
+	if second.Ref() != "#7b" || second.ResolvedBy != first.UID || second.Source == nil || second.Source.ID != "abcdef1234567890" {
+		t.Errorf("second = %+v", second)
+	}
+
+	for in, want := range map[string]string{
+		`not json`:                         "not a Holocron JSON export",
+		`{"entries": []}`:                  "no format field",
+		`{"format": "holocron.export/v9"}`: "unsupported export format",
+		`{"format": "holocron.export/v1", "entries": [{"id": 1, "uid": "nope"}]}`: "no valid UID",
+	} {
+		if _, err := ReadJSON(strings.NewReader(in)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("ReadJSON(%s) = %v, want %q", in, err, want)
+		}
+	}
+}
