@@ -145,7 +145,8 @@ func parseYesNo(s string) (bool, error) {
 }
 
 // CreateFromDoc saves a new entry from an edited document.
-func (a *App) CreateFromDoc(ctx context.Context, d EntryDoc) (CaptureResult, error) {
+// resolves names open items the new entry resolves, as in CaptureInput.
+func (a *App) CreateFromDoc(ctx context.Context, d EntryDoc, resolves ...string) (CaptureResult, error) {
 	if d.Body == "" {
 		return CaptureResult{}, ErrEmptyEntry
 	}
@@ -154,7 +155,7 @@ func (a *App) CreateFromDoc(ctx context.Context, d EntryDoc) (CaptureResult, err
 		at = ""
 	}
 	res, err := a.Capture(ctx, CaptureInput{Text: d.Body, Project: d.Project, Type: d.Type,
-		Tags: splitField(d.Tags), Marks: splitField(d.Marks), At: at, Raw: true})
+		Tags: splitField(d.Tags), Marks: splitField(d.Marks), At: at, Raw: true, Resolves: resolves})
 	if err != nil {
 		return res, err
 	}

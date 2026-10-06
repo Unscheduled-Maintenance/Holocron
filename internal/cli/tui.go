@@ -49,6 +49,9 @@ func runCapturePrompt(ctx context.Context, e *env, f *addFlags) error {
 	if len(f.tags) > 0 {
 		ctxParts = append(ctxParts, "#"+strings.Join(f.tags, " #"))
 	}
+	if len(f.resolves) > 0 {
+		ctxParts = append(ctxParts, "resolves #"+strings.Join(f.resolves, " #"))
+	}
 	text, ok, err := tui.Capture(ctx, strings.Join(ctxParts, " · "))
 	if err != nil {
 		return err
@@ -57,7 +60,7 @@ func runCapturePrompt(ctx context.Context, e *env, f *addFlags) error {
 		e.note("Nothing saved.")
 		return nil
 	}
-	res, err := a.Capture(ctx, app.CaptureInput{Text: text, Project: f.project, Type: f.typ, Tags: f.tags, Marks: f.marks, At: f.at, Raw: f.raw})
+	res, err := a.Capture(ctx, app.CaptureInput{Text: text, Project: f.project, Type: f.typ, Tags: f.tags, Marks: f.marks, At: f.at, Raw: f.raw, Resolves: f.resolves})
 	if err != nil {
 		return err
 	}

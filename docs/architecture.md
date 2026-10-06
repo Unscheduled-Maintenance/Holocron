@@ -109,11 +109,11 @@ Holocron imports a vendor SDK (ADR 0006).
   renames re-index affected entries. `holocron doctor` verifies the index;
   `--rebuild-index` regenerates it.
 
-### Schema (version 1)
+### Schema (version 2)
 
 | Table | Purpose |
 |---|---|
-| `entries` | `id` (AUTOINCREMENT, the `#42` number), `uid` (ULID), `occurred_at`, `utc_offset`, `body`, `type`, `project_id` → projects (SET NULL), `resolved_at`, `created_at`, `updated_at`, provenance (`source_type`, `source_id`, `source_url`, `imported_at`; unique on type+id) |
+| `entries` | `id` (AUTOINCREMENT, the `#42` number), `uid` (ULID), `occurred_at`, `utc_offset`, `body`, `type`, `project_id` → projects (SET NULL), `resolved_at`, `resolved_by` → the entry that resolved it (SET NULL; version 2), `created_at`, `updated_at`, provenance (`source_type`, `source_id`, `source_url`, `imported_at`; unique on type+id) |
 | `projects` | `id`, `uid`, `name` (unique, case-insensitive), `description`, `archived_at`, timestamps |
 | `project_aliases` | `alias` (unique, case-insensitive) → project |
 | `project_links` | repository `path`s and `url`s per project |

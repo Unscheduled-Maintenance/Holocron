@@ -55,6 +55,8 @@ The same shape is used by the export and by every command's `--json` output.
   "tags": ["iam", "security"],
   "marks": ["staff"],
   "resolved_at": null,
+  "resolved_by": null,
+  "resolves": [],
   "created_at": "2026-10-04T20:14:05.120Z",
   "updated_at": "2026-10-04T20:20:11.003Z",
   "source": null
@@ -73,6 +75,8 @@ The same shape is used by the export and by every command's `--json` output.
 | `tags` | array of strings | Lower-case, sorted. |
 | `marks` | array of strings | `staff`, `one-on-one`, `quarterly`, `important`, `cross-team`. |
 | `resolved_at` | timestamp or null | Set when a problem or follow-up was resolved. |
+| `resolved_by` | integer or null | The `id` of the entry that resolved this one (`holocron add --resolves`), when linked. Added in Holocron 0.3. |
+| `resolves` | array of integers | The `id`s of entries this one resolved, sorted. Empty when none. Added in Holocron 0.3. |
 | `created_at`, `updated_at` | timestamp | Record bookkeeping. |
 | `source` | object or null | Provenance for imported entries: `{"type": "git", "id": "<commit hash>", "url": "...", "imported_at": "..."}`. `url` is omitted when unknown. |
 

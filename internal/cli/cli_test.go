@@ -510,6 +510,48 @@ func TestTypeAliases(t *testing.T) {
 	mustNotContain(t, out, "win", "look")
 }
 
+func TestResolvesFlag(t *testing.T) {
+	h := newHarness(t)
+	h.ok("add", "Follow-up: ask about ARM capacity")
+	h.ok("add", "Problem: exporter restarts")
+	h.ok("add", "Note: lunch menu")
+	r := h.run("add", "ARM capacity approved", "--resolves", "1", "--resolves", "#3")
+	if r.code != 0 {
+		t.Fatalf("add --resolves: %+v", r)
+	}
+	mustContain(t, r.out, "Added", "#4", "Resolved", "#1", "ask about ARM capacity", "#3")
+	mustContain(t, r.err, "#3 is a note, not a problem or follow-up")
+
+	mustContain(t, h.ok("show", "1"), "resolved", "by #4")
+	mustContain(t, h.ok("show", "4"), "Resolves", "#1, #3")
+	mustContain(t, h.ok("list", "--open"), "exporter restarts")
+	mustNotContain(t, h.ok("list", "--open"), "ARM capacity")
+
+	var e struct {
+		ResolvedBy *int64  `json:"resolved_by"`
+		Resolves   []int64 `json:"resolves"`
+	}
+	if err := json.Unmarshal([]byte(h.ok("show", "1", "--json")), &e); err != nil || e.ResolvedBy == nil || *e.ResolvedBy != 4 {
+		t.Fatalf("show 1 --json: %+v %v", e, err)
+	}
+	if err := json.Unmarshal([]byte(h.ok("show", "4", "--json")), &e); err != nil || e.ResolvedBy != nil || len(e.Resolves) != 2 {
+		t.Fatalf("show 4 --json: %+v %v", e, err)
+	}
+	mustContain(t, h.ok("export", "--format", "markdown"), "follow-up (resolved by #4)", "resolves: #1, #3")
+	mustContain(t, h.ok("report", "staff"), "resolves #1: ask about ARM capacity")
+
+	if r := h.run("add", "again", "--resolves", "1"); r.code == 0 || !strings.Contains(r.err, "already resolved") {
+		t.Fatalf("resolving twice: %+v", r)
+	}
+	if n := strings.Count(h.ok("list"), "again"); n != 0 {
+		t.Fatal("a failed --resolves saved the entry")
+	}
+	h.ok("resolve", "1", "--reopen")
+	mustNotContain(t, h.ok("show", "1"), "by #4")
+	mustContain(t, h.ok("show", "4"), "#3")
+	mustNotContain(t, h.ok("show", "4"), "#1, #3")
+}
+
 func TestShowTypeAliases(t *testing.T) {
 	h := newHarness(t)
 	mustContain(t, h.ok("doctor"), "type aliases", "look → investigation, win → accomplishment")

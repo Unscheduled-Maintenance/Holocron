@@ -54,7 +54,9 @@ const selectEntries = `
 SELECT e.id, e.uid, e.occurred_at, e.utc_offset, e.body, coalesce(e.type, ''),
        coalesce(e.project_id, 0), coalesce(p.name, ''), e.resolved_at,
        e.created_at, e.updated_at,
-       e.source_type, e.source_id, e.source_url, e.imported_at`
+       e.source_type, e.source_id, e.source_url, e.imported_at,
+       coalesce(e.resolved_by, 0),
+       coalesce((SELECT group_concat(r.id) FROM entries r WHERE r.resolved_by = e.id), '')`
 
 const fromEntries = `
 FROM entries e
@@ -222,9 +224,10 @@ func scanEntries(rows *sql.Rows, withSnippet bool) ([]Entry, error) {
 		var e Entry
 		var typ, occurred, created, updated string
 		var resolved, srcType, srcID, srcURL, imported sql.NullString
+		var resolves string
 		dest := []any{&e.ID, &e.UID, &occurred, &e.UTCOffset, &e.Body, &typ,
 			&e.ProjectID, &e.Project, &resolved, &created, &updated,
-			&srcType, &srcID, &srcURL, &imported}
+			&srcType, &srcID, &srcURL, &imported, &e.ResolvedBy, &resolves}
 		if withSnippet {
 			dest = append(dest, &e.Snippet)
 		}
@@ -242,6 +245,12 @@ func scanEntries(rows *sql.Rows, withSnippet bool) ([]Entry, error) {
 			t, _ := parseTime(resolved.String)
 			e.ResolvedAt = &t
 		}
+		for _, s := range strings.Split(resolves, ",") {
+			if id, err := strconv.ParseInt(s, 10, 64); err == nil {
+				e.Resolves = append(e.Resolves, id)
+			}
+		}
+		slices.Sort(e.Resolves)
 		if srcType.Valid {
 			e.Source = &Source{Type: srcType.String, ID: srcID.String, URL: srcURL.String}
 			if imported.Valid {

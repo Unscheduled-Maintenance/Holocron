@@ -374,10 +374,21 @@ func (m Model) detailText(e journal.Entry, width int) string {
 	}
 	if e.Type.Opens() {
 		if e.ResolvedAt != nil {
-			row("Status", "resolved "+e.ResolvedAt.In(m.app.Loc).Format("2 Jan 2006"))
+			status := "resolved " + e.ResolvedAt.In(m.app.Loc).Format("2 Jan 2006")
+			if e.ResolvedBy != 0 {
+				status += fmt.Sprintf(" by #%d", e.ResolvedBy)
+			}
+			row("Status", status)
 		} else {
 			row("Status", sWarn.Render("open")+sFaint.Render("  (x resolves)"))
 		}
+	}
+	if len(e.Resolves) > 0 {
+		refs := make([]string, len(e.Resolves))
+		for i, id := range e.Resolves {
+			refs[i] = fmt.Sprintf("#%d", id)
+		}
+		row("Resolves", strings.Join(refs, ", "))
 	}
 	if len(e.Tags) > 0 {
 		tags := make([]string, len(e.Tags))

@@ -138,6 +138,9 @@ func (b Builder) buildStaff(r *Report, es, open []journal.Entry, opts Options) {
 
 	crossTeam := take(func(e journal.Entry) bool { return e.HasMark(journal.MarkCrossTeam) }, es)
 	completed := take(func(e journal.Entry) bool {
+		if len(e.Resolves) > 0 {
+			return true // closing an open problem or follow-up is completed work
+		}
 		switch e.Type {
 		case journal.TypeAccomplishment:
 			return true
@@ -195,7 +198,7 @@ func (b Builder) buildOneOnOne(r *Report, es, open []journal.Entry, opts Options
 	all := append(append([]journal.Entry{}, es...), open...)
 	discuss := take(func(e journal.Entry) bool { return e.HasMark(journal.MarkOneOnOne) }, all)
 	wins := take(func(e journal.Entry) bool {
-		return e.Type == journal.TypeAccomplishment || (e.HasMark(journal.MarkImportant) && !e.IsOpen())
+		return e.Type == journal.TypeAccomplishment || (e.HasMark(journal.MarkImportant) && !e.IsOpen()) || len(e.Resolves) > 0
 	}, es)
 	decisions := take(func(e journal.Entry) bool { return e.Type == journal.TypeDecision }, es)
 	problems := take(func(e journal.Entry) bool { return e.Type == journal.TypeProblem && e.IsOpen() }, all)

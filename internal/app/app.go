@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -113,12 +114,17 @@ type CaptureInput struct {
 	At      string
 	// Raw disables +project/#tag shorthand for this entry.
 	Raw bool
+	// Resolves names open problems or follow-ups ("42", "#42" or a UID) that
+	// this entry resolves.
+	Resolves []string
 }
 
 // CaptureResult reports side effects worth telling the person about.
 type CaptureResult struct {
 	Entry          journal.Entry
 	CreatedProject string
+	// Resolved holds the entries the new entry resolved, after resolving.
+	Resolved []journal.Entry
 }
 
 // Capture parses quick-capture input and saves a new entry.
@@ -168,6 +174,21 @@ func (a *App) Capture(ctx context.Context, in CaptureInput) (CaptureResult, erro
 		}
 	}
 	var res CaptureResult
+	var resolves []int64
+	for _, ref := range splitRefs(in.Resolves) {
+		target, err := a.Store.Get(ctx, ref)
+		if err != nil {
+			return CaptureResult{}, err
+		}
+		if slices.Contains(resolves, target.ID) {
+			continue
+		}
+		if target.ResolvedAt != nil {
+			return CaptureResult{}, fmt.Errorf("%w: %s is already resolved (reopen it with `holocron resolve %d --reopen`)", journal.ErrConflict, target.Ref(), target.ID)
+		}
+		resolves = append(resolves, target.ID)
+		res.Resolved = append(res.Resolved, target)
+	}
 	if project != "" {
 		if _, err := a.Store.Project(ctx, project); errors.Is(err, journal.ErrNotFound) {
 			if !a.Config.CreateProjectsEnabled() {
@@ -181,12 +202,18 @@ func (a *App) Capture(ctx context.Context, in CaptureInput) (CaptureResult, erro
 	e, err := a.Store.AddEntry(ctx, journal.NewEntry{
 		Body: text, OccurredAt: at, Type: typ, Project: project, CreateProject: true,
 		Tags: append(append([]string{}, in.Tags...), sh.Tags...), Marks: marks,
+		Resolves: resolves,
 	})
 	if err != nil {
 		return CaptureResult{}, err
 	}
 	if res.CreatedProject != "" {
 		res.CreatedProject = e.Project
+	}
+	for i, r := range res.Resolved {
+		if res.Resolved[i], err = a.Store.GetByID(ctx, r.ID); err != nil {
+			return CaptureResult{}, err
+		}
 	}
 	res.Entry = e
 	return res, nil
@@ -231,4 +258,17 @@ func (a *App) ExportArchive(ctx context.Context, q journal.Query, description st
 		}
 	}
 	return export.Archive{ExportedAt: a.now(), Description: description, Projects: projects, Entries: entries}, nil
+}
+
+// splitRefs splits repeated and comma-separated entry references.
+func splitRefs(in []string) []string {
+	var out []string
+	for _, s := range in {
+		for _, part := range strings.Split(s, ",") {
+			if p := strings.TrimSpace(part); p != "" {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
 }

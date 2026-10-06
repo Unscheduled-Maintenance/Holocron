@@ -209,6 +209,9 @@ func (b Builder) Build(ctx context.Context, kind Kind, opts Options) (Report, er
 	for _, e := range append(entries, open...) {
 		pool[e.ID] = e
 	}
+	if err := b.linkResolutions(ctx, &r, pool); err != nil {
+		return Report{}, err
+	}
 	for _, s := range r.Sections {
 		for _, it := range s.Items {
 			for _, id := range it.EntryIDs {
@@ -401,4 +404,37 @@ func joinNames(names []string) string {
 		return names[0]
 	}
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
+// linkResolutions notes on each item what its entry resolved, so a report
+// shows what happened to open problems and follow-ups: "Chased ARM capacity
+// (resolves #42: ask about ARM capacity)". The resolved entries are cited
+// too, and loaded into pool when they fall outside the report's range.
+func (b Builder) linkResolutions(ctx context.Context, r *Report, pool map[int64]journal.Entry) error {
+	for si := range r.Sections {
+		for ii := range r.Sections[si].Items {
+			it := &r.Sections[si].Items[ii]
+			if len(it.EntryIDs) != 1 {
+				continue
+			}
+			var parts []string
+			for _, id := range pool[it.EntryIDs[0]].Resolves {
+				re, ok := pool[id]
+				if !ok {
+					var err error
+					if re, err = b.Store.GetByID(ctx, id); err != nil {
+						return err
+					}
+					pool[id] = re
+				}
+				parts = append(parts, fmt.Sprintf("%s: %s", re.Ref(), re.Title()))
+				it.EntryIDs = append(it.EntryIDs, id)
+				it.Reasons = append(it.Reasons, "resolves "+re.Ref())
+			}
+			if len(parts) > 0 {
+				it.Text += " (resolves " + strings.Join(parts, "; ") + ")"
+			}
+		}
+	}
+	return nil
 }

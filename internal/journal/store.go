@@ -57,6 +57,9 @@ type NewEntry struct {
 	Tags          []string
 	Marks         []Mark
 	Source        *Source
+	// Resolves lists open problems or follow-ups this entry resolves; they
+	// are resolved at the entry's time and linked to it.
+	Resolves []int64
 }
 
 // AddEntry creates an entry, its tags and marks, and its search index row
@@ -148,10 +151,31 @@ func (s *Store) insertEntry(ctx context.Context, tx *sql.Tx, n NewEntry, id int6
 	if err := s.setMarks(ctx, tx, newID, n.Marks); err != nil {
 		return 0, err
 	}
+	for _, rid := range n.Resolves {
+		if err := s.resolveWith(ctx, tx, rid, newID, at, now); err != nil {
+			return 0, err
+		}
+	}
 	if err := reindex(ctx, tx, newID); err != nil {
 		return 0, err
 	}
 	return newID, nil
+}
+
+// resolveWith resolves entry id at time at, recording entry by as the one
+// that resolved it. An entry that is already resolved is a conflict, so a
+// resolution is never silently re-attributed.
+func (s *Store) resolveWith(ctx context.Context, tx *sql.Tx, id, by int64, at, now time.Time) error {
+	cur, err := s.getByID(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if cur.ResolvedAt != nil {
+		return fmt.Errorf("%w: %s is already resolved", ErrConflict, cur.Ref())
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE entries SET resolved_at = ?, resolved_by = ?, updated_at = ? WHERE id = ?`,
+		formatTime(at), by, formatTime(now), id)
+	return database.Describe(err)
 }
 
 // Get loads an entry by reference ("42", "#42" or a UID).
@@ -277,6 +301,9 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (Entry, error) {
 			}
 			sets = append(sets, "resolved_at = ?")
 			args = append(args, v)
+			if !*p.Resolved {
+				sets = append(sets, "resolved_by = NULL")
+			}
 		}
 		args = append(args, id)
 		if _, err := tx.ExecContext(ctx, `UPDATE entries SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...); err != nil {
@@ -349,9 +376,25 @@ func (s *Store) Restore(ctx context.Context, e Entry) (Entry, error) {
 		if e.ResolvedAt != nil {
 			resolved = sql.NullString{String: formatTime(*e.ResolvedAt), Valid: true}
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE entries SET created_at = ?, utc_offset = ?, resolved_at = ? WHERE id = ?`,
-			formatTime(e.CreatedAt), e.UTCOffset, resolved, e.ID)
-		return err
+		var resolvedBy sql.NullInt64
+		if e.ResolvedBy != 0 {
+			resolvedBy = sql.NullInt64{Int64: e.ResolvedBy, Valid: true}
+		}
+		// The resolver may have been deleted too; then the link stays dropped.
+		if _, err := tx.ExecContext(ctx, `UPDATE entries SET created_at = ?, utc_offset = ?, resolved_at = ?,
+			resolved_by = (SELECT id FROM entries WHERE id = ?) WHERE id = ?`,
+			formatTime(e.CreatedAt), e.UTCOffset, resolved, resolvedBy, e.ID); err != nil {
+			return database.Describe(err)
+		}
+		// Deleting this entry unlinked the entries it resolved; link back
+		// any that are still resolved and unlinked.
+		for _, rid := range e.Resolves {
+			if _, err := tx.ExecContext(ctx, `UPDATE entries SET resolved_by = ?
+				WHERE id = ? AND resolved_by IS NULL AND resolved_at IS NOT NULL`, e.ID, rid); err != nil {
+				return database.Describe(err)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return Entry{}, err

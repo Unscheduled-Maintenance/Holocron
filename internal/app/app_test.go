@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -229,5 +231,34 @@ func TestBackupDestinations(t *testing.T) {
 	}
 	if _, _, err := a.Backup(ctx, a.Paths.Database); err == nil {
 		t.Fatal("backing up onto the live archive must fail")
+	}
+}
+
+func TestCaptureResolves(t *testing.T) {
+	ctx := context.Background()
+	a := openApp(t, "")
+	fu, _ := a.Capture(ctx, CaptureInput{Text: "Follow-up: ask about ARM capacity"})
+	pr, _ := a.Capture(ctx, CaptureInput{Text: "Problem: exporter restarts"})
+	res, err := a.Capture(ctx, CaptureInput{Text: "ARM capacity approved", At: "16:00",
+		Resolves: []string{"#" + strconv.FormatInt(fu.Entry.ID, 10) + ", " + pr.Entry.UID, strconv.FormatInt(fu.Entry.ID, 10)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(res.Entry.Resolves, []int64{fu.Entry.ID, pr.Entry.ID}) || len(res.Resolved) != 2 {
+		t.Fatalf("Resolves = %v, Resolved = %d", res.Entry.Resolves, len(res.Resolved))
+	}
+	for _, r := range res.Resolved {
+		if r.ResolvedBy != res.Entry.ID || r.ResolvedAt == nil || !r.ResolvedAt.Equal(res.Entry.OccurredAt) {
+			t.Fatalf("%s resolved %v by %d", r.Ref(), r.ResolvedAt, r.ResolvedBy)
+		}
+	}
+	if _, err := a.Capture(ctx, CaptureInput{Text: "again", Resolves: []string{"1"}}); !errors.Is(err, journal.ErrConflict) {
+		t.Fatalf("already resolved: %v", err)
+	}
+	if _, err := a.Capture(ctx, CaptureInput{Text: "nope", Resolves: []string{"#99"}}); !errors.Is(err, journal.ErrNotFound) {
+		t.Fatalf("unknown entry: %v", err)
+	}
+	if _, err := a.Capture(ctx, CaptureInput{Text: "bad ref", Resolves: []string{"forty-two"}}); err == nil {
+		t.Fatal("a malformed reference was accepted")
 	}
 }
