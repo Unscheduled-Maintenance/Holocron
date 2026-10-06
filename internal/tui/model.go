@@ -299,7 +299,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus(text, false)
 		cmd := m.reload()
 		m.selectID(msg.entry.ID)
-		return m, cmd
+		return m, tea.Batch(cmd, m.publish())
 
 	case deletedMsg:
 		if msg.err != nil {
@@ -312,7 +312,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenDetail {
 			m.screen = screenList
 		}
-		return m, m.reload()
+		return m, tea.Batch(m.reload(), m.publish())
 
 	case reportMsg:
 		if msg.err != nil {
@@ -802,4 +802,14 @@ func (m Model) appendPage(msg entriesMsg) Model {
 	m.clampScroll()
 	m.refreshDetail()
 	return m
+}
+
+// publish sends this computer's changes to the sync folder in the
+// background, when sync is set up. Problems are reported on exit.
+func (m *Model) publish() tea.Cmd {
+	ctx, a := m.ctx, m.app
+	return func() tea.Msg {
+		a.SyncPush(ctx)
+		return nil
+	}
 }

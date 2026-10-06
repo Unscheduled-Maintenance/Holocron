@@ -56,6 +56,7 @@ type EntryRecord struct {
 	UID        string     `json:"uid"`
 	Num        int64      `json:"num"`
 	Label      string     `json:"label,omitempty"`
+	Device     string     `json:"device,omitempty"` // UID of the device that numbered it
 	OccurredAt time.Time  `json:"occurred_at"`
 	UTCOffset  int        `json:"utc_offset"`
 	Body       string     `json:"body"`
@@ -169,7 +170,7 @@ func (s *Store) ReadRecords(ctx context.Context, changedOnly bool) (Records, err
 
 	// Entries.
 	rows, err = s.db.QueryContext(ctx, `
-		SELECT e.id, e.uid, e.num, coalesce(nd.label, ''), e.occurred_at, e.utc_offset, e.body, coalesce(e.type, ''),
+		SELECT e.id, e.uid, e.num, coalesce(nd.label, ''), coalesce(nd.uid, ''), e.occurred_at, e.utc_offset, e.body, coalesce(e.type, ''),
 		       coalesce(p.uid, ''), e.resolved_at, coalesce(rb.uid, ''), e.created_at, e.updated_at,
 		       e.source_type, e.source_id, e.source_url, e.imported_at, e.clocks
 		FROM entries e
@@ -186,7 +187,7 @@ func (s *Store) ReadRecords(ctx context.Context, changedOnly bool) (Records, err
 		var id int64
 		var typ, occurred, created, updated, clocks string
 		var resolved, srcType, srcID, srcURL, imported sql.NullString
-		if err := rows.Scan(&id, &r.UID, &r.Num, &r.Label, &occurred, &r.UTCOffset, &r.Body, &typ, &r.Project,
+		if err := rows.Scan(&id, &r.UID, &r.Num, &r.Label, &r.Device, &occurred, &r.UTCOffset, &r.Body, &typ, &r.Project,
 			&resolved, &r.ResolvedBy, &created, &updated, &srcType, &srcID, &srcURL, &imported, &clocks); err != nil {
 			rows.Close()
 			return out, database.Describe(err)
@@ -507,7 +508,11 @@ func (m *merger) devices(in []DeviceRecord, self Device) error {
 			}
 		case err != nil:
 			return err
-		case existing.Label == "" && d.Label != "":
+		case d.Label != "" && existing.Label != d.Label:
+			if other, err := deviceWhere(m.ctx, m.tx, `label = ?`, d.Label); err == nil && other.ID != existing.ID {
+				m.warn("device %s and device %s both use the label %q", d.UID, other.UID, d.Label)
+				continue
+			}
 			if err := m.exec(`UPDATE devices SET label = ?, name = ? WHERE id = ?`, d.Label, d.Name, existing.ID); err != nil {
 				return err
 			}
@@ -886,8 +891,11 @@ func (m *merger) insertEntry(r EntryRecord) (bool, error) {
 func (m *merger) number(r EntryRecord) (int64, sql.NullInt64, error) {
 	var dev sql.NullInt64
 	ok := r.Num > 0
-	if ok && r.Label != "" {
-		d, err := deviceWhere(m.ctx, m.tx, `label = ?`, r.Label)
+	if ok && (r.Device != "" || r.Label != "") {
+		d, err := deviceWhere(m.ctx, m.tx, `uid = ?`, r.Device)
+		if errors.Is(err, ErrNotFound) && r.Label != "" {
+			d, err = deviceWhere(m.ctx, m.tx, `label = ?`, r.Label)
+		}
 		if errors.Is(err, ErrNotFound) {
 			ok = false
 		} else if err != nil {

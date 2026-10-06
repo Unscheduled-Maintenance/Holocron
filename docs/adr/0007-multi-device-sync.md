@@ -190,8 +190,9 @@ Each laptop keeps its own config.
 - Every file except `format.json` is encrypted with
   [age](https://age-encryption.org) (`filippo.io/age`, pure Go). age's
   authenticated encryption also rejects altered or damaged files.
-- `holocron sync init` generates one random **data key** (an age X25519
-  identity), and every sync file is encrypted to it. The data key itself is
+- `holocron sync init` generates one random **data key** (an age
+  identity; implemented with age's post-quantum hybrid key, its recommended
+  native key since v1.3), and every sync file is encrypted to it. The data key itself is
   stored only in wrapped form, once per unlock method chosen. A device
   unlocks it once, by any one of those methods, and caches it in the
   **OS keychain**:
