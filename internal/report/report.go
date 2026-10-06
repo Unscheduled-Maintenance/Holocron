@@ -141,6 +141,8 @@ type Options struct {
 	Projects []string
 	// MaxItems caps each section; 0 means the builder default.
 	MaxItems int
+	// Note is an extra summary line, such as why the range was chosen.
+	Note string
 }
 
 // Builder produces reports from a store.
@@ -152,10 +154,18 @@ type Builder struct {
 	// OpenLookback is how far back unresolved problems and follow-ups are
 	// collected for one-on-one and staff reports.
 	OpenLookback string
+	// StaffEarlyDays makes a this-week staff report cover last week when it is
+	// run within this many days of the start of the week.
+	StaffEarlyDays int
 }
 
-// DefaultRange returns the natural range for a report kind.
-func (b Builder) DefaultRange(k Kind, staffRange, oneOnOneRange string) timerange.Range {
+// DefaultRange returns the natural range for a report kind, and a note for the
+// report when the choice needs explaining.
+//
+// People often write the staff update at the start of the week, about the week
+// that just finished, so early in the week a this-week staff report covers last
+// week instead (see StaffEarlyDays).
+func (b Builder) DefaultRange(k Kind, staffRange, oneOnOneRange string) (timerange.Range, string) {
 	expr := map[Kind]string{Day: "today", Week: "this-week", Staff: staffRange, OneOnOne: oneOnOneRange, Quarter: "this-quarter"}[k]
 	if expr == "" {
 		expr = "this-week"
@@ -164,7 +174,13 @@ func (b Builder) DefaultRange(k Kind, staffRange, oneOnOneRange string) timerang
 	if err != nil {
 		r, _ = b.Clock.Parse("this-week")
 	}
-	return r
+	if k == Staff && strings.EqualFold(strings.TrimSpace(expr), "this-week") && b.StaffEarlyDays > 0 &&
+		b.Clock.Now.Before(b.Clock.WeekStartOf(b.Clock.Now).AddDate(0, 0, b.StaffEarlyDays)) {
+		if last, err := b.Clock.Parse("last-week"); err == nil {
+			return last, "Covering last week because it is early in the week (reports.staff_early_days)."
+		}
+	}
+	return r, ""
 }
 
 // Build generates a report.
@@ -184,6 +200,9 @@ func (b Builder) Build(ctx context.Context, kind Kind, opts Options) (Report, er
 		Range:       opts.Range,
 		GeneratedAt: b.Clock.Now,
 		Entries:     map[int64]journal.Entry{},
+	}
+	if opts.Note != "" {
+		r.Summary = append(r.Summary, opts.Note)
 	}
 	var open []journal.Entry
 	if kind == Staff || kind == OneOnOne {

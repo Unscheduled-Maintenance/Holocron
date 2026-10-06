@@ -109,7 +109,7 @@ Holocron imports a vendor SDK (ADR 0006).
   renames re-index affected entries. `holocron doctor` verifies the index;
   `--rebuild-index` regenerates it.
 
-### Schema (version 2)
+### Schema (version 3)
 
 | Table | Purpose |
 |---|---|
@@ -119,6 +119,7 @@ Holocron imports a vendor SDK (ADR 0006).
 | `project_links` | repository `path`s and `url`s per project |
 | `tags`, `entry_tags` | reusable tags; unused tags are pruned |
 | `entry_marks` | report marks per entry (ADR 0005) |
+| `report_log` | reports recorded as sent (`--record`): `kind`, `range_start`, `range_end`, `recorded_at`; read by `--since last` (version 3) |
 | `entries_fts` | FTS5 index (`unicode61`, diacritics removed) |
 | `schema_migrations` | applied migrations; mirrored in `PRAGMA user_version` |
 

@@ -498,12 +498,12 @@ func (m Model) buildReport(rng *timerange.Range) tea.Cmd {
 	if m.f.project != "" && m.f.project != "-" {
 		projects = []string{m.f.project}
 	}
-	r := a.DefaultReportRange(kind)
+	r, note := a.DefaultReportRange(kind)
 	if rng != nil {
-		r = *rng
+		r, note = *rng, ""
 	}
 	return func() tea.Msg {
-		rep, err := a.ReportBuilder().Build(ctx, kind, report.Options{Range: r, Projects: projects})
+		rep, err := a.ReportBuilder().Build(ctx, kind, report.Options{Range: r, Projects: projects, Note: note})
 		return reportMsg{rep: rep, err: err}
 	}
 }

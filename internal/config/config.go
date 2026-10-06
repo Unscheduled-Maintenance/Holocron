@@ -68,6 +68,9 @@ type ReportsConfig struct {
 	OneOnOneRange string `toml:"one_on_one_range"`
 	// StaffRange is the default range for the staff report.
 	StaffRange string `toml:"staff_range"`
+	// StaffEarlyDays makes a this-week staff report cover last week instead
+	// when run within this many days of the start of the week. 0 disables it.
+	StaffEarlyDays int `toml:"staff_early_days"`
 	// OpenLookback is how far back to look for unresolved problems and follow-ups.
 	OpenLookback string `toml:"open_lookback"`
 }
@@ -103,10 +106,11 @@ func Default() Config {
 		TypeAliases: journal.DefaultTypeAliases(),
 		Capture:     CaptureConfig{Shorthand: &shorthand, CreateProjects: &create},
 		Reports: ReportsConfig{
-			MaxItems:      8,
-			OneOnOneRange: "14d",
-			StaffRange:    "this-week",
-			OpenLookback:  "90d",
+			MaxItems:       8,
+			OneOnOneRange:  "14d",
+			StaffRange:     "this-week",
+			StaffEarlyDays: 1,
+			OpenLookback:   "90d",
 		},
 		TUI: TUIConfig{DefaultRange: "this-week"},
 	}
@@ -141,6 +145,9 @@ func (c Config) Validate() error {
 	}
 	if c.Reports.MaxItems < 0 {
 		errs = append(errs, fmt.Errorf("reports.max_items: must not be negative"))
+	}
+	if c.Reports.StaffEarlyDays < 0 || c.Reports.StaffEarlyDays > 6 {
+		errs = append(errs, fmt.Errorf("reports.staff_early_days: must be between 0 and 6"))
 	}
 	probe := timerange.NewClock(timeNow(), nil, 0)
 	for name, v := range map[string]string{
@@ -337,6 +344,7 @@ const Template = `# Holocron configuration.
 [reports]
 # max_items = 8             # bullets per report section
 # staff_range = "this-week"
+# staff_early_days = 1     # early in the week, a this-week staff report covers last week (0 = off)
 # one_on_one_range = "14d"
 # open_lookback = "90d"     # how far back to look for open problems and follow-ups
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Unscheduled-Maintenance/Holocron/internal/config"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/journal"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/report"
 )
 
 var now = time.Date(2026, 10, 5, 15, 0, 0, 0, time.UTC)
@@ -260,5 +261,21 @@ func TestCaptureResolves(t *testing.T) {
 	}
 	if _, err := a.Capture(ctx, CaptureInput{Text: "bad ref", Resolves: []string{"forty-two"}}); err == nil {
 		t.Fatal("a malformed reference was accepted")
+	}
+}
+
+func TestStaffDefaultRange(t *testing.T) {
+	// now is Monday 5 October 2026.
+	r, note := openApp(t, "").DefaultReportRange(report.Staff)
+	if r.Start.Format("2006-01-02") != "2026-09-28" || !strings.Contains(note, "early in the week") {
+		t.Fatalf("Monday staff range = %s %q", r.Label, note)
+	}
+	r, note = openApp(t, "[reports]\nstaff_early_days = 0\n").DefaultReportRange(report.Staff)
+	if r.Start.Format("2006-01-02") != "2026-10-05" || note != "" {
+		t.Fatalf("staff_early_days = 0: %s %q", r.Label, note)
+	}
+	r, note = openApp(t, "[reports]\nstaff_range = \"14d\"\n").DefaultReportRange(report.Staff)
+	if r.Start.Format("2006-01-02") != "2026-09-22" || note != "" {
+		t.Fatalf("staff_range = 14d: %s %q", r.Label, note)
 	}
 }
