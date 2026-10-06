@@ -116,6 +116,27 @@ are optional.
 | `--raw` | Store the text exactly as given (no shorthand parsing). |
 | `--json`, `-q` | Print the saved entry as JSON, or only its ID. |
 
+### Entry types
+
+A type says what kind of record an entry is. It's optional, but it's what
+lets reports pick out the entries that matter. Set it with `--type`, a
+`Type:` prefix (see [Shorthand](#shorthand)), or the Type field in the TUI.
+
+| Type | When to use |
+|---|---|
+| `accomplishment` | Something finished, shipped or fixed that you'd mention to others. Leads the staff update (Completed), the one-on-one (Wins) and the quarterly report. |
+| `decision` | A choice made, ideally with the reason. Gets its own Decisions section in the staff, one-on-one and quarterly reports. |
+| `problem` | Something broken, blocking or going wrong. Appears under Problems in the staff update, and stays **open** until resolved: open problems carry into every one-on-one report until then. |
+| `follow-up` | Something to do, chase or check later. Stays **open** until resolved; open follow-ups appear under Coming up (staff) and Open follow-ups (one-on-one). |
+| `investigation` | Digging into something before you know the answer. Kept out of the staff update unless marked; repeated investigations on the same tag or project show up as recurring friction in the one-on-one report. |
+| `work` | Routine progress: reviews, maintenance, steady work on a task. Counted in week and quarter summaries, but left out of the staff update unless marked. |
+| `note` | Context worth keeping that isn't work: meetings, ideas, things learned. Ranked lowest; never in the staff update unless marked. |
+| *(none)* | Anything you don't want to classify. Treated much like `work`. |
+
+Mark a problem or follow-up done with `holocron resolve <id>` (or `x` in the
+TUI). Any entry can be pulled into a report regardless of type with a
+[report mark](#report-marks).
+
 ### Shorthand
 
 Inside the entry text, `+project` and `#tag` set metadata quickly:
