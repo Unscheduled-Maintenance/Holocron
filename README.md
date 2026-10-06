@@ -571,6 +571,15 @@ Each computer keeps a complete archive and works offline: changes made while
 offline are published by the first command run once the folder is back. Run
 `holocron sync` to sync now and see what came in.
 
+**Receive-only computers.** To have notes from a personal laptop show up on
+a work laptop but never the other way round, make the work laptop
+receive-only: `holocron sync join ~/OneDrive/Holocron --receive-only` (or
+`init --receive-only`, or `holocron sync mode receive-only` later). It merges
+the other computers' changes but publishes none of its own. Its edits to
+entries from other computers stay on it too, and a later edit to the same
+field elsewhere replaces them. `holocron sync mode two-way` publishes
+everything on it, after asking.
+
 **Conflicts resolve themselves.** Each field of an entry (text, time, type,
 project, tags, marks, resolution) is merged on its own, and the most recent
 change wins, so editing the tags on one computer and the text on the other
@@ -613,13 +622,14 @@ writes the key to a plain file.
 | `holocron sync key rotate` | Replace the key (re-add `--passphrase` / `--ssh-key`); other computers then run `unlock`. |
 | `holocron sync compact` | Fold this computer's change files into one snapshot (also done daily or after 50 changes). |
 | `holocron sync relabel` | Take a new letter if two computers ended up with the same one; sync says when. |
+| `holocron sync mode` | Show or change whether this computer is two-way or receive-only. |
 | `holocron sync off` | Stop syncing this archive. Nothing is deleted. |
 
 Things to know:
 
 - **Ask before syncing work notes.** Syncing work notes through a personal
   cloud folder, or onto a personal computer, may be against your employer's
-  rules.
+  rules. A receive-only work computer keeps its notes out of the folder.
 - **Keep the folder on the device.** OneDrive "Files On-Demand" can leave
   files in the cloud only, and they can't be read offline. Mark the folder
   *Always keep on this device*. Holocron skips a file it can't read yet and

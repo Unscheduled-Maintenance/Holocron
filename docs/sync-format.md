@@ -28,6 +28,8 @@ not know stops syncing and asks to be upgraded.
   orders one computer's files and always increases.
 - **A snapshot holds everything that computer knows.** A changes file holds
   the records it changed since its previous file.
+- **A receive-only computer writes only `device.age`**, so its label stays
+  taken. It removes any snapshot and changes files of its own.
 
 ## format.json
 

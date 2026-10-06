@@ -25,6 +25,7 @@ const (
 	metaSet      = "sync_set"
 	metaLastPull = "sync_last_pull"
 	metaLastPush = "sync_last_push"
+	metaReceive  = "sync_receive_only"
 	cursorPrefix = "sync_cursor:"
 )
 
@@ -60,6 +61,9 @@ func (s *Syncer) now() time.Time {
 type Config struct {
 	Folder string // the folder chosen by the person; files live in Folder/holocron-sync
 	Set    string
+	// ReceiveOnly means this computer merges other computers' changes but
+	// publishes none of its own records, only its device.age.
+	ReceiveOnly bool
 }
 
 // Configured returns the sync configuration, or ErrNotConfigured.
@@ -75,7 +79,11 @@ func (s *Syncer) Configured(ctx context.Context) (Config, error) {
 	if dir == "" || set == "" {
 		return Config{}, ErrNotConfigured
 	}
-	return Config{Folder: dir, Set: set}, nil
+	receive, err := s.Store.Meta(ctx, metaReceive)
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{Folder: dir, Set: set, ReceiveOnly: receive == "1"}, nil
 }
 
 func folderAt(dir string) folder { return folder{root: filepath.Join(dir, DirName)} }
@@ -192,6 +200,13 @@ type InitOptions struct {
 	Name          string   // this computer's name; defaults to the host name
 	Passphrase    string   // also allow unlocking with this passphrase
 	SSHPublicKeys []string // also allow unlocking with these SSH keys
+	ReceiveOnly   bool     // Init only: never publish this computer's records
+}
+
+// JoinOptions configure joining a sync folder.
+type JoinOptions struct {
+	Name        string // this computer's name; defaults to the host name
+	ReceiveOnly bool   // never publish this computer's records
 }
 
 // InitResult reports a new sync folder.
@@ -236,7 +251,7 @@ func (s *Syncer) Init(ctx context.Context, dir string, opts InitOptions) (InitRe
 		return InitResult{}, err
 	}
 	res := InitResult{Label: self.Label, Key: key.String()}
-	if err := s.configure(ctx, dir, set, key); err != nil {
+	if err := s.configure(ctx, dir, set, key, opts.ReceiveOnly); err != nil {
 		return res, err
 	}
 	if err := s.publishDevice(ctx, f, self, opts.Name, key); err != nil {
@@ -267,14 +282,25 @@ func (s *Syncer) writeUnlocks(f folder, key *age.HybridIdentity, passphrase stri
 	return nil
 }
 
-func (s *Syncer) configure(ctx context.Context, dir, set string, key *age.HybridIdentity) error {
+func (s *Syncer) configure(ctx context.Context, dir, set string, key *age.HybridIdentity, receiveOnly bool) error {
 	if err := s.Store.SetMeta(ctx, metaFolder, dir); err != nil {
 		return err
 	}
 	if err := s.Store.SetMeta(ctx, metaSet, set); err != nil {
 		return err
 	}
+	if err := s.setReceiveOnly(ctx, receiveOnly); err != nil {
+		return err
+	}
 	return s.remember(set, key)
+}
+
+func (s *Syncer) setReceiveOnly(ctx context.Context, on bool) error {
+	v := ""
+	if on {
+		v = "1"
+	}
+	return s.Store.SetMeta(ctx, metaReceive, v)
 }
 
 func (s *Syncer) publishDevice(ctx context.Context, f folder, self journal.Device, name string, key *age.HybridIdentity) error {
@@ -301,7 +327,7 @@ type JoinResult struct {
 // Join connects this archive to an existing sync folder: it unlocks the
 // key, takes the next free label, gives its own existing entries that label
 // (keeping their digits), merges everything in the folder and publishes.
-func (s *Syncer) Join(ctx context.Context, dir string, u Unlock, name string) (JoinResult, error) {
+func (s *Syncer) Join(ctx context.Context, dir string, u Unlock, opts JoinOptions) (JoinResult, error) {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return JoinResult{}, err
@@ -367,7 +393,7 @@ func (s *Syncer) Join(ctx context.Context, dir string, u Unlock, name string) (J
 	if res.Renumbered, err = s.Store.NumberOwnEntries(ctx, known); err != nil {
 		return res, err
 	}
-	if err := s.configure(ctx, dir, ff.Set, key); err != nil {
+	if err := s.configure(ctx, dir, ff.Set, key, opts.ReceiveOnly); err != nil {
 		return res, err
 	}
 	if res.Pull, err = s.Pull(ctx); err != nil {
@@ -376,7 +402,7 @@ func (s *Syncer) Join(ctx context.Context, dir string, u Unlock, name string) (J
 	if err := s.Store.SkipPlainNumbers(ctx); err != nil {
 		return res, err
 	}
-	if err := s.publishDevice(ctx, f, self, name, key); err != nil {
+	if err := s.publishDevice(ctx, f, self, opts.Name, key); err != nil {
 		return res, err
 	}
 	return res, s.compact(ctx, f, key, self.UID)
@@ -581,7 +607,9 @@ type PushResult struct {
 }
 
 // Push publishes records changed here since the last push, and compacts
-// this device's files when there are many or its snapshot is old.
+// this device's files when there are many or its snapshot is old. A
+// receive-only computer publishes nothing, and removes any record files of
+// its own still in the folder.
 func (s *Syncer) Push(ctx context.Context) (PushResult, error) {
 	var res PushResult
 	cfg, err := s.Configured(ctx)
@@ -592,6 +620,13 @@ func (s *Syncer) Push(ctx context.Context) (PushResult, error) {
 	ff, err := f.readFormat()
 	if err != nil {
 		return res, err
+	}
+	if cfg.ReceiveOnly {
+		self, err := s.Store.SelfDevice(ctx)
+		if err != nil {
+			return res, err
+		}
+		return res, withdraw(f, self.UID, 0)
 	}
 	recs, err := s.Store.ReadRecords(ctx, true)
 	if err != nil {
@@ -667,6 +702,11 @@ func (s *Syncer) Compact(ctx context.Context) error {
 }
 
 func (s *Syncer) compact(ctx context.Context, f folder, key *age.HybridIdentity, selfUID string) error {
+	if v, err := s.Store.Meta(ctx, metaReceive); err != nil {
+		return err
+	} else if v == "1" {
+		return withdraw(f, selfUID, 0)
+	}
 	recs, err := s.Store.ReadRecords(ctx, false)
 	if err != nil {
 		return err
@@ -682,18 +722,66 @@ func (s *Syncer) compact(ctx context.Context, f folder, key *age.HybridIdentity,
 		return err
 	}
 	// Only once the snapshot is written do the files it replaces go.
-	files, err := f.listRecordFiles(selfUID)
+	if err := withdraw(f, selfUID, stamp); err != nil {
+		return err
+	}
+	return s.Store.SetMeta(ctx, metaLastPush, s.now().UTC().Format(time.RFC3339))
+}
+
+// withdraw removes a device's record files older than stamp, or all of
+// them when stamp is 0. Its device.age stays.
+func withdraw(f folder, uid string, stamp int64) error {
+	files, err := f.listRecordFiles(uid)
 	if err != nil {
 		return err
 	}
 	for _, rf := range files {
-		if rf.stamp < stamp {
-			if err := os.Remove(filepath.Join(f.deviceDir(selfUID), rf.name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if stamp == 0 || rf.stamp < stamp {
+			if err := os.Remove(filepath.Join(f.deviceDir(uid), rf.name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
 		}
 	}
-	return s.Store.SetMeta(ctx, metaLastPush, s.now().UTC().Format(time.RFC3339))
+	return nil
+}
+
+// SetReceiveOnly switches this computer between receive-only and two-way.
+// Becoming receive-only removes this computer's record files from the
+// folder; computers that already merged them keep them. Becoming two-way
+// publishes a snapshot of everything in this archive.
+func (s *Syncer) SetReceiveOnly(ctx context.Context, on bool) error {
+	cfg, err := s.Configured(ctx)
+	if err != nil {
+		return err
+	}
+	if cfg.ReceiveOnly == on {
+		return nil
+	}
+	f := folderAt(cfg.Folder)
+	ff, err := f.readFormat()
+	if err != nil {
+		return err
+	}
+	self, err := s.Store.SelfDevice(ctx)
+	if err != nil {
+		return err
+	}
+	if on {
+		// Recorded first, so nothing is published if removing fails; the
+		// next push tries again.
+		if err := s.setReceiveOnly(ctx, true); err != nil {
+			return err
+		}
+		return withdraw(f, self.UID, 0)
+	}
+	key, err := s.currentKey(ff)
+	if err != nil {
+		return err
+	}
+	if err := s.setReceiveOnly(ctx, false); err != nil {
+		return err
+	}
+	return s.compact(ctx, f, key, self.UID)
 }
 
 // DeviceStatus describes one device in the folder.
@@ -705,15 +793,16 @@ type DeviceStatus struct {
 
 // Status describes sync on this computer.
 type Status struct {
-	Folder     string
-	Label      string
-	Locked     bool
-	KeyCommand bool // sync.key_command is configured
-	Devices    []DeviceStatus
-	Pending    int
-	LastPull   time.Time
-	LastPush   time.Time
-	Problem    string // why the folder cannot be read, if it cannot
+	Folder      string
+	Label       string
+	ReceiveOnly bool
+	Locked      bool
+	KeyCommand  bool // sync.key_command is configured
+	Devices     []DeviceStatus
+	Pending     int
+	LastPull    time.Time
+	LastPush    time.Time
+	Problem     string // why the folder cannot be read, if it cannot
 }
 
 // Status reports the state of sync without changing anything.
@@ -723,7 +812,7 @@ func (s *Syncer) Status(ctx context.Context) (Status, error) {
 	if err != nil {
 		return st, err
 	}
-	st.Folder = cfg.Folder
+	st.Folder, st.ReceiveOnly = cfg.Folder, cfg.ReceiveOnly
 	self, err := s.Store.SelfDevice(ctx)
 	if err != nil {
 		return st, err
@@ -919,7 +1008,7 @@ func (s *Syncer) Off(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, k := range []string{metaFolder, metaSet, metaLastPull, metaLastPush} {
+	for _, k := range []string{metaFolder, metaSet, metaLastPull, metaLastPush, metaReceive} {
 		if err := s.Store.SetMeta(ctx, k, ""); err != nil {
 			return err
 		}

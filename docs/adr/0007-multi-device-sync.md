@@ -279,3 +279,26 @@ Each laptop keeps its own config.
   visible but can't prevent it.
 - Holocron gains a sync format to version and document alongside
   `holocron.export/v1`.
+
+## Addendum: receive-only computers (2026-10-07, #26)
+
+Some people want sync in one direction only: notes made on a personal laptop
+should reach a work laptop, but work notes must never leave the work laptop.
+A computer can therefore be **receive-only**, chosen with `init` or `join
+--receive-only` or later with `holocron sync mode`. It is a setting of that
+archive, not of the folder, and the folder format does not change.
+
+- A receive-only computer pulls as usual but never writes snapshot or
+  changes files. It still writes `device.age`, so its label stays taken and
+  label clashes are still detected.
+- Becoming receive-only deletes its own record files from the folder.
+  Computers that already merged them keep them, and their own snapshots
+  include them, since a snapshot holds everything a computer knows.
+- Becoming two-way writes a full snapshot of the archive, so the command
+  asks first.
+- Its edits to entries from other computers stay local. A later edit to the
+  same field elsewhere wins on the next pull, as with any newer change.
+
+Filtering by project ("sync everything except project X") was considered.
+It is more flexible but has to handle entries moving between projects,
+deletes and same-name project merges, so it was left for if it is needed.
