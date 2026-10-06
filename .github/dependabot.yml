@@ -1,0 +1,24 @@
+# Version updates for Go modules and the actions used in the workflows.
+# Security updates for vulnerable versions are enabled separately in the
+# repository settings and are not limited by this schedule.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: deps
+    groups:
+      go-modules:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns: ["*"]
