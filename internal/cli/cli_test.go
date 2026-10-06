@@ -488,3 +488,24 @@ func TestListFitsTerminalWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestTypeAliases(t *testing.T) {
+	h := newHarness(t)
+	h.ok("add", "Win: rotated the keys")
+	h.ok("add", "Why does the cache miss", "--type", "look")
+	h.ok("add", "Unrelated note", "--type", "note")
+
+	var entries []struct {
+		Body string  `json:"body"`
+		Type *string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(h.ok("list", "--type", "win,look", "--json", "--reverse")), &entries); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].Body != "rotated the keys" || *entries[0].Type != "accomplishment" || *entries[1].Type != "investigation" {
+		t.Fatalf("aliased entries = %+v", entries)
+	}
+	out := h.ok("list")
+	mustContain(t, out, "accomplishment", "investigation")
+	mustNotContain(t, out, "win", "look")
+}

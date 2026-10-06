@@ -105,7 +105,7 @@ func (f *filterFlags) query(a *app.App, def timerange.Range) (journal.Query, err
 	}
 	q := journal.Query{Range: r, Projects: f.projects, Tags: f.tags, OpenOnly: f.open}
 	for _, t := range splitValues(f.types) {
-		typ, err := journal.ParseType(t)
+		typ, err := a.ParseType(t)
 		if err != nil {
 			return q, err
 		}

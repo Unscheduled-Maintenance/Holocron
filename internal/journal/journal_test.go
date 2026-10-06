@@ -504,7 +504,7 @@ func TestShorthand(t *testing.T) {
 		{"#only #tags", "", "", []string{"only", "tags"}, ""},
 	}
 	for _, c := range cases {
-		got, err := ParseShorthand(c.in)
+		got, err := ParseShorthand(c.in, nil)
 		if err != nil {
 			t.Errorf("ParseShorthand(%q): %v", c.in, err)
 			continue
@@ -513,8 +513,85 @@ func TestShorthand(t *testing.T) {
 			t.Errorf("ParseShorthand(%q) = %+v, want body=%q project=%q tags=%v type=%q", c.in, got, c.body, c.project, c.tags, c.typ)
 		}
 	}
-	if _, err := ParseShorthand("+aws +gcp moved things"); err == nil {
+	if _, err := ParseShorthand("+aws +gcp moved things", nil); err == nil {
 		t.Error("two projects should be an error")
+	}
+}
+
+func TestTypeAliases(t *testing.T) {
+	al, err := NewTypeAliases(DefaultTypeAliases())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(al, TypeAliases{"win": TypeAccomplishment, "look": TypeInvestigation}) {
+		t.Fatalf("default aliases = %v", al)
+	}
+	for in, want := range map[string]Type{"win": TypeAccomplishment, "WIN": TypeAccomplishment, "Look": TypeInvestigation, "dec": TypeDecision, "work": TypeWork, "": TypeNone} {
+		if got, err := al.Parse(in); err != nil || got != want {
+			t.Errorf("Parse(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"wi", "looking", "chore"} {
+		if _, err := al.Parse(bad); err == nil {
+			t.Errorf("Parse(%q) succeeded: aliases match exactly", bad)
+		}
+	}
+	if _, err := ParseType("win"); err == nil {
+		t.Error("ParseType must not know about aliases")
+	}
+
+	// An exact alias beats a type prefix ("w" would otherwise mean work).
+	custom, err := NewTypeAliases(map[string]string{"w": "acc", "Ship": "accomplishment", "look": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(custom, TypeAliases{"w": TypeAccomplishment, "ship": TypeAccomplishment}) {
+		t.Fatalf("custom aliases = %v", custom)
+	}
+
+	for name, in := range map[string]map[string]string{
+		"type name":      {"decision": "accomplishment"},
+		"type variant":   {"followup": "note"},
+		"unknown target": {"win": "victory"},
+		"none target":    {"win": "none"},
+		"bad characters": {"big win": "accomplishment"},
+		"leading digit":  {"1on1": "note"},
+	} {
+		if _, err := NewTypeAliases(in); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: NewTypeAliases(%v) = %v, want ErrInvalid", name, in, err)
+		}
+	}
+}
+
+func TestShorthandTypeAliases(t *testing.T) {
+	al, err := NewTypeAliases(DefaultTypeAliases())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		in, body string
+		typ      Type
+	}{
+		{"Win: rotated the keys +aws", "rotated the keys", TypeAccomplishment},
+		{"win:no space", "no space", TypeAccomplishment},
+		{"LOOK : why the cache misses", "why the cache misses", TypeInvestigation},
+		{"Decision: still works", "still works", TypeDecision},
+		{"Wins: plural is text", "Wins: plural is text", TypeNone},
+		{"Dec: prefixes are text", "Dec: prefixes are text", TypeNone},
+		{"Big win: mid-sentence", "Big win: mid-sentence", TypeNone},
+	}
+	for _, c := range cases {
+		got, err := ParseShorthand(c.in, al)
+		if err != nil {
+			t.Errorf("ParseShorthand(%q): %v", c.in, err)
+			continue
+		}
+		if got.Body != c.body || got.Type != c.typ {
+			t.Errorf("ParseShorthand(%q) = body %q type %q, want %q %q", c.in, got.Body, got.Type, c.body, c.typ)
+		}
+	}
+	if got, _ := ParseShorthand("Win: no aliases configured", nil); got.Type != TypeNone || got.Body != "Win: no aliases configured" {
+		t.Errorf("without aliases, Win: is text: %+v", got)
 	}
 }
 

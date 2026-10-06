@@ -88,6 +88,74 @@ func TestCaptureRules(t *testing.T) {
 	}
 }
 
+func TestCaptureTypeAliases(t *testing.T) {
+	ctx := context.Background()
+	a := openApp(t, "[type_aliases]\nship = \"accomplishment\"\n")
+	cases := []struct {
+		in   CaptureInput
+		body string
+		typ  journal.Type
+	}{
+		{CaptureInput{Text: "Win: rotated the keys +aws"}, "rotated the keys", journal.TypeAccomplishment},
+		{CaptureInput{Text: "look: why the cache misses"}, "why the cache misses", journal.TypeInvestigation},
+		{CaptureInput{Text: "Ship: exporter v2"}, "exporter v2", journal.TypeAccomplishment},
+		{CaptureInput{Text: "Closed the incident", Type: "win"}, "Closed the incident", journal.TypeAccomplishment},
+		{CaptureInput{Text: "Win: same type either way", Type: "accomplishment"}, "same type either way", journal.TypeAccomplishment},
+		{CaptureInput{Text: "Win: kept as typed", Type: "look"}, "Win: kept as typed", journal.TypeInvestigation},
+		{CaptureInput{Text: "Win: raw", Raw: true}, "Win: raw", journal.TypeNone},
+	}
+	for _, c := range cases {
+		res, err := a.Capture(ctx, c.in)
+		if err != nil {
+			t.Errorf("Capture(%+v): %v", c.in, err)
+			continue
+		}
+		if res.Entry.Body != c.body || res.Entry.Type != c.typ {
+			t.Errorf("Capture(%+v) = %q %q, want %q %q", c.in, res.Entry.Body, res.Entry.Type, c.body, c.typ)
+		}
+		// The real type is stored, never the alias.
+		stored, err := a.Store.GetByID(ctx, res.Entry.ID)
+		if err != nil || stored.Type != c.typ {
+			t.Errorf("stored type = %q, %v; want %q", stored.Type, err, c.typ)
+		}
+	}
+
+	// Aliases also work in the editor document's type field.
+	res, err := a.Capture(ctx, CaptureInput{Text: "Exporter restarts", Type: "problem"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := res.Entry
+	parsed, err := ParseEntryDoc(strings.Replace(a.DocFor(&e).Format("x"), "type: problem", "type: win", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.PatchFromDoc(e, parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Type == nil || *p.Type != journal.TypeAccomplishment {
+		t.Fatalf("doc type alias = %v", p.Type)
+	}
+	u, err := a.Store.Update(ctx, e.ID, p)
+	if err != nil || u.Type != journal.TypeAccomplishment {
+		t.Fatalf("Update = %q, %v", u.Type, err)
+	}
+	if got := a.DocFor(&u).Type; got != "accomplishment" {
+		t.Fatalf("documents must show the real type, got %q", got)
+	}
+
+	// A removed default is no longer an alias.
+	plain := openApp(t, "[type_aliases]\nwin = \"\"\n")
+	res, err = plain.Capture(ctx, CaptureInput{Text: "Win: just text"})
+	if err != nil || res.Entry.Type != journal.TypeNone || res.Entry.Body != "Win: just text" {
+		t.Fatalf("removed alias: %q %q %v", res.Entry.Type, res.Entry.Body, err)
+	}
+	if _, err := plain.ParseType("win"); !errors.Is(err, journal.ErrInvalid) {
+		t.Fatalf("removed alias parsed: %v", err)
+	}
+}
+
 func TestEntryDocRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	a := openApp(t, "")

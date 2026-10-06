@@ -6,6 +6,9 @@ package journal
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -54,6 +57,86 @@ func ParseType(s string) (Type, error) {
 		return TypeFollowUp, nil
 	}
 	return matchVocabulary(s, Types, "type")
+}
+
+// TypeAliases maps shorthand names to entry types: "win" for accomplishment.
+// Aliases are input only: entries always store and display the real type.
+// Keys are lower case.
+type TypeAliases map[string]Type
+
+// DefaultTypeAliases returns the built-in aliases.
+func DefaultTypeAliases() map[string]string {
+	return map[string]string{
+		"win":  string(TypeAccomplishment),
+		"look": string(TypeInvestigation),
+	}
+}
+
+var aliasRe = regexp.MustCompile(`^\p{L}[\p{L}\p{N}_-]*$`)
+
+// NewTypeAliases validates configured aliases. An empty target removes the
+// alias, so a default can be switched off. Aliases may not be type names.
+func NewTypeAliases(in map[string]string) (TypeAliases, error) {
+	out := TypeAliases{}
+	var errs []error
+	for _, name := range slices.Sorted(maps.Keys(in)) {
+		target := strings.TrimSpace(in[name])
+		alias := strings.ToLower(strings.TrimSpace(name))
+		if target == "" {
+			continue
+		}
+		if !aliasRe.MatchString(alias) {
+			errs = append(errs, fmt.Errorf("%w: type alias %q must start with a letter and contain only letters, digits, dashes and underscores", ErrInvalid, name))
+			continue
+		}
+		if _, ok := leadType(alias); ok {
+			errs = append(errs, fmt.Errorf("%w: type alias %q is already a type name", ErrInvalid, name))
+			continue
+		}
+		t, err := ParseType(target)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("type alias %q: %w", name, err))
+			continue
+		}
+		if t == TypeNone {
+			errs = append(errs, fmt.Errorf("%w: type alias %q must name a type", ErrInvalid, name))
+			continue
+		}
+		out[alias] = t
+	}
+	return out, errors.Join(errs...)
+}
+
+// Parse is ParseType that also accepts an alias. An exact alias wins over a
+// type prefix.
+func (al TypeAliases) Parse(s string) (Type, error) {
+	if t, ok := al[strings.ToLower(strings.TrimSpace(s))]; ok {
+		return t, nil
+	}
+	return ParseType(s)
+}
+
+// Lead resolves the word before the colon in a "Decision: ..." capture
+// prefix. Only whole type names, the follow-up spellings and aliases count;
+// prefixes do not, so "Dec: ..." stays as text.
+func (al TypeAliases) Lead(word string) (Type, bool) {
+	if t, ok := al[strings.ToLower(word)]; ok {
+		return t, true
+	}
+	return leadType(word)
+}
+
+func leadType(word string) (Type, bool) {
+	w := strings.ToLower(word)
+	if w == "followup" {
+		return TypeFollowUp, true
+	}
+	for _, t := range Types {
+		if string(t) == w {
+			return t, true
+		}
+	}
+	return TypeNone, false
 }
 
 // Mark is an explicit report signal: "this entry belongs in the staff

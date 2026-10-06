@@ -29,7 +29,7 @@ type addFlags struct {
 func (f *addFlags) register(cmd *cobra.Command) {
 	fs := cmd.Flags()
 	fs.StringVarP(&f.project, "project", "p", "", "project name or alias (created on first use)")
-	fs.StringVar(&f.typ, "type", "", "entry type: "+strings.Join(journal.TypeStrings(), ", ")+" (unique prefixes work)")
+	fs.StringVar(&f.typ, "type", "", "entry type: "+strings.Join(journal.TypeStrings(), ", ")+" (unique prefixes and type aliases work)")
 	fs.StringSliceVarP(&f.tags, "tag", "t", nil, "tag (repeatable or comma-separated)")
 	fs.StringSliceVar(&f.marks, "mark", nil, "report mark: staff, one-on-one, quarterly, important, cross-team")
 	fs.StringVar(&f.at, "at", "", "when it happened: 14:30, yesterday 16:00, 2026-10-02 09:15, -2h (default: now)")
