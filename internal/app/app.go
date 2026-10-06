@@ -327,7 +327,6 @@ func (a *App) ImportJSON(ctx context.Context, r io.Reader, dryRun bool) (ImportR
 	res.ApplyResult, err = a.Store.Apply(ctx, recs, journal.ApplyOptions{})
 	return res, err
 }
-<<<<<<< HEAD
 
 // pull merges other computers' changes when sync is set up. Problems never
 // stop the command: they are kept for SyncNotes, and a sync that cannot run
@@ -377,5 +376,3 @@ func (a *App) note(format string, args ...any) {
 		a.syncNotes = append(a.syncNotes, msg)
 	}
 }
-=======
->>>>>>> origin/main
