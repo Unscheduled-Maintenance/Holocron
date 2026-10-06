@@ -62,6 +62,14 @@ func Doctor(ctx context.Context, opts Options, dopts DoctorOptions) []Check {
 	} else {
 		add("config", CheckOK, "%s is valid", paths.ConfigFile)
 	}
+	// After a config failure cfg holds the defaults, which would mislead.
+	if aliases, aerr := journal.NewTypeAliases(cfg.TypeAliases); err == nil && aerr == nil {
+		if len(aliases) == 0 {
+			add("type aliases", CheckInfo, "none configured")
+		} else {
+			add("type aliases", CheckInfo, "%s", aliases.Describe())
+		}
+	}
 	add("database path", CheckInfo, "%s", paths.Database)
 
 	if _, err := os.Stat(paths.Database); errors.Is(err, fs.ErrNotExist) {
