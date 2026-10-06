@@ -728,3 +728,16 @@ func TestProjectForPathCanonicalises(t *testing.T) {
 		}
 	}
 }
+
+func TestTypeAliasesDescribe(t *testing.T) {
+	al := TypeAliases{"win": TypeAccomplishment, "look": TypeInvestigation}
+	if got := al.Describe(); got != "look → investigation, win → accomplishment" {
+		t.Errorf("Describe = %q", got)
+	}
+	if got := (TypeAliases{}).Describe(); got != "" {
+		t.Errorf("empty Describe = %q", got)
+	}
+	if got := al.Strings(); !reflect.DeepEqual(got, map[string]string{"win": "accomplishment", "look": "investigation"}) {
+		t.Errorf("Strings = %v", got)
+	}
+}

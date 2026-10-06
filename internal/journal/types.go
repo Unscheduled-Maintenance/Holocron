@@ -107,6 +107,25 @@ func NewTypeAliases(in map[string]string) (TypeAliases, error) {
 	return out, errors.Join(errs...)
 }
 
+// Strings returns the aliases as alias → type name, for display.
+func (al TypeAliases) Strings() map[string]string {
+	out := make(map[string]string, len(al))
+	for k, t := range al {
+		out[k] = string(t)
+	}
+	return out
+}
+
+// Describe lists the aliases sorted by name: "look → investigation, win →
+// accomplishment".
+func (al TypeAliases) Describe() string {
+	parts := make([]string, 0, len(al))
+	for _, k := range slices.Sorted(maps.Keys(al)) {
+		parts = append(parts, k+" → "+string(al[k]))
+	}
+	return strings.Join(parts, ", ")
+}
+
 // Parse is ParseType that also accepts an alias. An exact alias wins over a
 // type prefix.
 func (al TypeAliases) Parse(s string) (Type, error) {

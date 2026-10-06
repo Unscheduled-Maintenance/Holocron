@@ -12,6 +12,7 @@ import (
 	"github.com/Unscheduled-Maintenance/Holocron/internal/app"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/config"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/editor"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/journal"
 )
 
 func newConfigCmd(e *env) *cobra.Command {
@@ -59,6 +60,13 @@ editor. Secrets such as API keys never belong in it.`,
 			if err != nil {
 				return err
 			}
+			// Show the aliases in effect: defaults plus the file, without
+			// the ones removed with "".
+			aliases, err := journal.NewTypeAliases(cfg.TypeAliases)
+			if err != nil {
+				return err
+			}
+			cfg.TypeAliases = aliases.Strings()
 			text, err := config.Encode(cfg)
 			if err != nil {
 				return err
