@@ -157,7 +157,8 @@ look = ""                    # removes the built-in alias
 ```
 
 Aliases are matched exactly and ignore letter case. An alias may contain
-letters, digits, `-` and `_`, and may not be a type name.
+letters, digits, `-` and `_`, and may not be a type name. `holocron config
+show` and `holocron doctor` list the aliases in effect.
 
 ### Shorthand
 

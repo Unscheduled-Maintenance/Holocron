@@ -551,3 +551,36 @@ func TestResolvesFlag(t *testing.T) {
 	mustContain(t, h.ok("show", "4"), "#3")
 	mustNotContain(t, h.ok("show", "4"), "#1, #3")
 }
+
+func TestShowTypeAliases(t *testing.T) {
+	h := newHarness(t)
+	mustContain(t, h.ok("doctor"), "type aliases", "look → investigation, win → accomplishment")
+	show := h.ok("config", "show")
+	mustContain(t, show, "[type_aliases]", `look = "investigation"`, `win = "accomplishment"`)
+
+	cfg := "[type_aliases]\nship = \"accomplishment\"\nlook = \"\"\n"
+	if err := os.WriteFile(filepath.Join(h.dir, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	doctor := h.ok("doctor")
+	mustContain(t, doctor, "ship → accomplishment, win → accomplishment")
+	mustNotContain(t, doctor, "look →")
+	show = h.ok("config", "show")
+	mustContain(t, show, `ship = "accomplishment"`, `win = "accomplishment"`)
+	mustNotContain(t, show, "look =")
+
+	cfg = "[type_aliases]\nwin = \"\"\nlook = \"\"\n"
+	if err := os.WriteFile(filepath.Join(h.dir, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, h.ok("doctor"), "none configured")
+
+	// A broken config is reported as such, not as the default aliases.
+	cfg = "[type_aliases]\nwin = \"victory\"\n"
+	if err := os.WriteFile(filepath.Join(h.dir, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := h.run("doctor")
+	mustContain(t, r.out+r.err, "victory")
+	mustNotContain(t, r.out, "look → investigation")
+}
