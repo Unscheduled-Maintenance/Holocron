@@ -84,8 +84,15 @@ func (s *Store) RenameTag(ctx context.Context, from, to string) (int, error) {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM tags WHERE id = ?`, fromID); err != nil {
 			return database.Describe(err)
 		}
+		clock, err := s.tick(ctx, tx)
+		if err != nil {
+			return err
+		}
 		for _, id := range ids {
 			if err := reindex(ctx, tx, id); err != nil {
+				return err
+			}
+			if err := touchEntry(ctx, tx, id, clock, FieldTags); err != nil {
 				return err
 			}
 		}
@@ -149,7 +156,7 @@ func (s *Store) ImportEntries(ctx context.Context, items []NewEntry) ([]Entry, i
 			if !errors.Is(err, sql.ErrNoRows) {
 				return database.Describe(err)
 			}
-			id, err := s.insertEntry(ctx, tx, n, 0, "")
+			id, err := s.insertEntry(ctx, tx, n, nil)
 			if err != nil {
 				return err
 			}

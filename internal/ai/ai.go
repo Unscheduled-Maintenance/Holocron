@@ -15,7 +15,6 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/Unscheduled-Maintenance/Holocron/internal/config"
@@ -106,34 +105,35 @@ func BuildRequest(rep report.Report) Request {
 		if len(e.Tags) > 0 {
 			meta = append(meta, "tags: "+strings.Join(e.Tags, ", "))
 		}
-		fmt.Fprintf(&b, "<entry id=\"#%d\" %s>\n%s\n</entry>\n", e.ID, strings.Join(meta, "; "), e.Body)
+		fmt.Fprintf(&b, "<entry id=\"%s\" %s>\n%s\n</entry>\n", e.Ref(), strings.Join(meta, "; "), e.Body)
 	}
 	return Request{System: systemPrompt, Prompt: b.String()}
 }
 
-var citeRe = regexp.MustCompile(`\[#(\d+)\]`)
+var citeRe = regexp.MustCompile(`\[(#\d+[a-z]*)\]`)
 
-// Citations returns the cited IDs that are valid sources and any that are not.
-func Citations(text string, rep report.Report) (cited, unknown []int64) {
-	valid := map[int64]bool{}
+// Citations returns the cited entries that are valid sources (by ID) and
+// the references cited that are not.
+func Citations(text string, rep report.Report) (cited []int64, unknown []string) {
+	valid := map[string]int64{}
 	for _, id := range rep.SourceIDs() {
-		valid[id] = true
+		valid[rep.Refs([]int64{id})[0]] = id
 	}
-	seen := map[int64]bool{}
+	seen := map[string]bool{}
 	for _, m := range citeRe.FindAllStringSubmatch(text, -1) {
-		id, err := strconv.ParseInt(m[1], 10, 64)
-		if err != nil || seen[id] {
+		ref := strings.ToLower(m[1])
+		if seen[ref] {
 			continue
 		}
-		seen[id] = true
-		if valid[id] {
+		seen[ref] = true
+		if id, ok := valid[ref]; ok {
 			cited = append(cited, id)
 		} else {
-			unknown = append(unknown, id)
+			unknown = append(unknown, ref)
 		}
 	}
 	sort.Slice(cited, func(i, j int) bool { return cited[i] < cited[j] })
-	sort.Slice(unknown, func(i, j int) bool { return unknown[i] < unknown[j] })
+	sort.Strings(unknown)
 	return cited, unknown
 }
 
@@ -154,14 +154,10 @@ func Provenance(text string, rep report.Report, providerName string) string {
 		if isCited[id] {
 			mark = "x"
 		}
-		fmt.Fprintf(&b, "- [%s] #%d %s\n", mark, id, e.Title())
+		fmt.Fprintf(&b, "- [%s] %s %s\n", mark, rep.Refs([]int64{id})[0], e.Title())
 	}
 	if len(unknown) > 0 {
-		parts := make([]string, len(unknown))
-		for i, id := range unknown {
-			parts[i] = fmt.Sprintf("#%d", id)
-		}
-		fmt.Fprintf(&b, "\n**Warning:** the text cites %s, which were not among the supplied entries. Treat those statements with suspicion.\n", strings.Join(parts, ", "))
+		fmt.Fprintf(&b, "\n**Warning:** the text cites %s, which were not among the supplied entries. Treat those statements with suspicion.\n", strings.Join(unknown, ", "))
 	}
 	return b.String()
 }

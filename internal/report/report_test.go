@@ -463,3 +463,34 @@ func TestReportNote(t *testing.T) {
 		t.Fatalf("summary = %v", rep.Summary)
 	}
 }
+
+func TestLabelledReferences(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	if _, err := f.store.SetSelfLabel(ctx, "a"); err != nil {
+		t.Fatal(err)
+	}
+	e, err := f.store.AddEntry(ctx, journal.NewEntry{Body: "Shipped the labelled release", Type: journal.TypeAccomplishment,
+		OccurredAt: time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Label != "a" {
+		t.Fatalf("entry ref = %s", e.Ref())
+	}
+	rep := f.build(t, Staff, "this-week")
+	var buf bytes.Buffer
+	if err := Text(&buf, rep, RenderOptions{ShowIDs: true, Styler: style.New(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), e.Ref()) {
+		t.Errorf("--ids output lacks %s:\n%s", e.Ref(), buf.String())
+	}
+	buf.Reset()
+	if err := JSON(&buf, rep); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"`+e.Ref()+`"`) {
+		t.Errorf("JSON lacks %s", e.Ref())
+	}
+}

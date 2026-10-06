@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -56,11 +57,18 @@ SELECT e.id, e.uid, e.occurred_at, e.utc_offset, e.body, coalesce(e.type, ''),
        e.created_at, e.updated_at,
        e.source_type, e.source_id, e.source_url, e.imported_at,
        coalesce(e.resolved_by, 0),
-       coalesce((SELECT group_concat(r.id) FROM entries r WHERE r.resolved_by = e.id), '')`
+       coalesce((SELECT group_concat(r.id || ':' || r.num || coalesce(rd.label, ''))
+                 FROM entries r LEFT JOIN devices rd ON rd.id = r.num_device
+                 WHERE r.resolved_by = e.id), ''),
+       e.num, coalesce(nd.label, ''),
+       coalesce((SELECT r.num || coalesce(rd.label, '')
+                 FROM entries r LEFT JOIN devices rd ON rd.id = r.num_device
+                 WHERE r.id = e.resolved_by), '')`
 
 const fromEntries = `
 FROM entries e
-LEFT JOIN projects p ON p.id = e.project_id`
+LEFT JOIN projects p ON p.id = e.project_id
+LEFT JOIN devices nd ON nd.id = e.num_device`
 
 // Find returns the entries matching q.
 func (s *Store) Find(ctx context.Context, q Query) ([]Entry, error) {
@@ -224,10 +232,10 @@ func scanEntries(rows *sql.Rows, withSnippet bool) ([]Entry, error) {
 		var e Entry
 		var typ, occurred, created, updated string
 		var resolved, srcType, srcID, srcURL, imported sql.NullString
-		var resolves string
+		var resolves, resolvedByRef string
 		dest := []any{&e.ID, &e.UID, &occurred, &e.UTCOffset, &e.Body, &typ,
 			&e.ProjectID, &e.Project, &resolved, &created, &updated,
-			&srcType, &srcID, &srcURL, &imported, &e.ResolvedBy, &resolves}
+			&srcType, &srcID, &srcURL, &imported, &e.ResolvedBy, &resolves, &e.Num, &e.Label, &resolvedByRef}
 		if withSnippet {
 			dest = append(dest, &e.Snippet)
 		}
@@ -245,12 +253,26 @@ func scanEntries(rows *sql.Rows, withSnippet bool) ([]Entry, error) {
 			t, _ := parseTime(resolved.String)
 			e.ResolvedAt = &t
 		}
+		if resolvedByRef != "" {
+			e.ResolvedByRef = "#" + resolvedByRef
+		}
+		// resolves holds "id:ref" pairs.
+		type link struct {
+			id  int64
+			ref string
+		}
+		var links []link
 		for _, s := range strings.Split(resolves, ",") {
-			if id, err := strconv.ParseInt(s, 10, 64); err == nil {
-				e.Resolves = append(e.Resolves, id)
+			idStr, ref, _ := strings.Cut(s, ":")
+			if id, err := strconv.ParseInt(idStr, 10, 64); err == nil {
+				links = append(links, link{id, "#" + ref})
 			}
 		}
-		slices.Sort(e.Resolves)
+		slices.SortFunc(links, func(a, b link) int { return cmp.Compare(a.id, b.id) })
+		for _, l := range links {
+			e.Resolves = append(e.Resolves, l.id)
+			e.ResolvesRefs = append(e.ResolvesRefs, l.ref)
+		}
 		if srcType.Valid {
 			e.Source = &Source{Type: srcType.String, ID: srcID.String, URL: srcURL.String}
 			if imported.Valid {

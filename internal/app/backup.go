@@ -134,6 +134,10 @@ func Restore(ctx context.Context, opts Options, src string) (RestoreResult, erro
 	// as "#57" written down after the backup was taken could silently start
 	// pointing at a different record.
 	issued := map[string]int64{}
+	// The same goes for entry numbers (ADR 0007): the plain-number counter and
+	// each device's labelled-number counter. Older archives have neither.
+	deviceNext := map[string]int64{}
+	var plainNext int64
 	if _, err := os.Stat(paths.Database); err == nil {
 		live, err := database.Open(ctx, paths.Database, database.Options{NoMigrate: true, MustExist: true})
 		if err != nil {
@@ -149,6 +153,17 @@ func Restore(ctx context.Context, opts Options, src string) (RestoreResult, erro
 			}
 			rows.Close()
 		}
+		if rows, err := live.QueryContext(ctx, `SELECT uid, next_num FROM devices`); err == nil {
+			for rows.Next() {
+				var uid string
+				var next int64
+				if rows.Scan(&uid, &next) == nil {
+					deviceNext[uid] = next
+				}
+			}
+			rows.Close()
+		}
+		_ = live.QueryRowContext(ctx, `SELECT value FROM sync_meta WHERE key = 'plain_next'`).Scan(&plainNext)
 		res.SafetyBackup = filepath.Join(paths.BackupDir, fmt.Sprintf("holocron-pre-restore-%s.db", time.Now().Format("20060102-150405")))
 		if err := live.Backup(ctx, res.SafetyBackup); err != nil {
 			_ = live.Close()
@@ -190,6 +205,18 @@ func Restore(ctx context.Context, opts Options, src string) (RestoreResult, erro
 		if _, err := db.ExecContext(ctx, `INSERT INTO sqlite_sequence (name, seq) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = ?)`, name, seq, name); err != nil {
 			_ = db.Close()
 			return res, fmt.Errorf("preserving ID numbering after restore: %w", err)
+		}
+	}
+	if plainNext > 0 {
+		if _, err := db.ExecContext(ctx, `UPDATE sync_meta SET value = max(CAST(value AS INTEGER), ?) WHERE key = 'plain_next'`, plainNext); err != nil {
+			_ = db.Close()
+			return res, fmt.Errorf("preserving entry numbering after restore: %w", err)
+		}
+	}
+	for uid, next := range deviceNext {
+		if _, err := db.ExecContext(ctx, `UPDATE devices SET next_num = max(next_num, ?) WHERE uid = ?`, next, uid); err != nil {
+			_ = db.Close()
+			return res, fmt.Errorf("preserving entry numbering after restore: %w", err)
 		}
 	}
 	return res, db.Close()

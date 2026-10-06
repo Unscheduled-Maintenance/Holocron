@@ -68,7 +68,7 @@ func (s *Store) AddEntry(ctx context.Context, n NewEntry) (Entry, error) {
 	var id int64
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
 		var err error
-		id, err = s.insertEntry(ctx, tx, n, 0, "")
+		id, err = s.insertEntry(ctx, tx, n, nil)
 		return err
 	})
 	if err != nil {
@@ -77,9 +77,14 @@ func (s *Store) AddEntry(ctx context.Context, n NewEntry) (Entry, error) {
 	return s.getByID(ctx, s.db, id)
 }
 
-// insertEntry inserts within tx. A non-zero id/uid re-creates a previously
-// deleted entry with its original identity (used by undo).
-func (s *Store) insertEntry(ctx context.Context, tx *sql.Tx, n NewEntry, id int64, uid string) (int64, error) {
+// insertEntry inserts within tx. A non-nil keep re-creates a previously
+// deleted entry with its original identity: ID, UID and number (used by undo).
+func (s *Store) insertEntry(ctx context.Context, tx *sql.Tx, n NewEntry, keep *Entry) (int64, error) {
+	var id int64
+	var uid string
+	if keep != nil {
+		id, uid = keep.ID, keep.UID
+	}
 	body, err := NormalizeBody(n.Body)
 	if err != nil {
 		return 0, err
@@ -129,11 +134,29 @@ func (s *Store) insertEntry(ctx context.Context, tx *sql.Tx, n NewEntry, id int6
 	if id > 0 {
 		idArg = id
 	}
+	var num int64
+	var numDevice sql.NullInt64
+	if keep != nil {
+		num = keep.Num
+		if keep.Label != "" {
+			d, err := deviceWhere(ctx, tx, `label = ?`, keep.Label)
+			if err != nil {
+				return 0, err
+			}
+			numDevice = sql.NullInt64{Int64: d.ID, Valid: true}
+		}
+	} else if num, numDevice, err = s.nextNumber(ctx, tx); err != nil {
+		return 0, err
+	}
+	clock, err := s.tick(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO entries (id, uid, occurred_at, utc_offset, body, type, project_id,
+		INSERT INTO entries (id, uid, num, num_device, occurred_at, utc_offset, body, type, project_id,
 		                     created_at, updated_at, source_type, source_id, source_url, imported_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		idArg, uid, formatTime(at), offset, body, nullString(string(n.Type)), projectID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		idArg, uid, num, numDevice, formatTime(at), offset, body, nullString(string(n.Type)), projectID,
 		formatTime(now), formatTime(now), src.typ, src.id, src.url, src.at)
 	if err != nil {
 		if isUniqueViolation(err) && n.Source != nil {
@@ -145,6 +168,9 @@ func (s *Store) insertEntry(ctx context.Context, tx *sql.Tx, n NewEntry, id int6
 	if err != nil {
 		return 0, err
 	}
+	if err := touchEntry(ctx, tx, newID, clock, EntryFields...); err != nil {
+		return 0, err
+	}
 	if err := setTags(ctx, tx, newID, tags); err != nil {
 		return 0, err
 	}
@@ -152,7 +178,7 @@ func (s *Store) insertEntry(ctx context.Context, tx *sql.Tx, n NewEntry, id int6
 		return 0, err
 	}
 	for _, rid := range n.Resolves {
-		if err := s.resolveWith(ctx, tx, rid, newID, at, now); err != nil {
+		if err := s.resolveWith(ctx, tx, rid, newID, at, now, clock); err != nil {
 			return 0, err
 		}
 	}
@@ -165,7 +191,7 @@ func (s *Store) insertEntry(ctx context.Context, tx *sql.Tx, n NewEntry, id int6
 // resolveWith resolves entry id at time at, recording entry by as the one
 // that resolved it. An entry that is already resolved is a conflict, so a
 // resolution is never silently re-attributed.
-func (s *Store) resolveWith(ctx context.Context, tx *sql.Tx, id, by int64, at, now time.Time) error {
+func (s *Store) resolveWith(ctx context.Context, tx *sql.Tx, id, by int64, at, now time.Time, clock HLC) error {
 	cur, err := s.getByID(ctx, tx, id)
 	if err != nil {
 		return err
@@ -175,23 +201,41 @@ func (s *Store) resolveWith(ctx context.Context, tx *sql.Tx, id, by int64, at, n
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE entries SET resolved_at = ?, resolved_by = ?, updated_at = ? WHERE id = ?`,
 		formatTime(at), by, formatTime(now), id)
-	return database.Describe(err)
+	if err != nil {
+		return database.Describe(err)
+	}
+	return touchEntry(ctx, tx, id, clock, FieldResolved)
 }
 
-// Get loads an entry by reference ("42", "#42" or a UID).
+// Get loads an entry by reference: "42", "#42", "#12a" or a UID.
+//
+// A plain number means the entry with that plain number. Once sync has given
+// this device a label, a plain number with no such entry means this device's
+// own entry, so "12" finds #12a on device a.
 func (s *Store) Get(ctx context.Context, ref string) (Entry, error) {
-	id, uid, err := ParseRef(ref)
+	r, err := ParseRef(ref)
 	if err != nil {
 		return Entry{}, err
 	}
-	if uid != "" {
-		err := s.db.QueryRowContext(ctx, `SELECT id FROM entries WHERE uid = ?`, uid).Scan(&id)
-		if errors.Is(err, sql.ErrNoRows) {
-			return Entry{}, fmt.Errorf("%w: no entry with UID %s", ErrNotFound, uid)
-		}
-		if err != nil {
-			return Entry{}, database.Describe(err)
-		}
+	var id int64
+	switch {
+	case r.UID != "":
+		err = s.db.QueryRowContext(ctx, `SELECT id FROM entries WHERE uid = ?`, r.UID).Scan(&id)
+	case r.Label != "":
+		err = s.db.QueryRowContext(ctx, `SELECT e.id FROM entries e JOIN devices d ON d.id = e.num_device
+			WHERE d.label = ? AND e.num = ?`, r.Label, r.Num).Scan(&id)
+	default:
+		err = s.db.QueryRowContext(ctx, `SELECT id FROM entries WHERE num_device IS NULL AND num = ?
+			UNION ALL
+			SELECT e.id FROM entries e JOIN devices d ON d.id = e.num_device
+			WHERE d.is_self = 1 AND d.label IS NOT NULL AND e.num = ?
+			LIMIT 1`, r.Num, r.Num).Scan(&id)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return Entry{}, fmt.Errorf("%w: no entry %s", ErrNotFound, r)
+	}
+	if err != nil {
+		return Entry{}, database.Describe(err)
 	}
 	return s.getByID(ctx, s.db, id)
 }
@@ -256,6 +300,7 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (Entry, error) {
 		now := s.now()
 		sets := []string{"updated_at = ?"}
 		args := []any{formatTime(now)}
+		var fields []string
 
 		if p.Body != nil {
 			body, err := NormalizeBody(*p.Body)
@@ -264,11 +309,13 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (Entry, error) {
 			}
 			sets = append(sets, "body = ?")
 			args = append(args, body)
+			fields = append(fields, FieldBody)
 		}
 		if p.OccurredAt != nil {
 			_, off := p.OccurredAt.In(s.loc).Zone()
 			sets = append(sets, "occurred_at = ?", "utc_offset = ?")
 			args = append(args, formatTime(*p.OccurredAt), off)
+			fields = append(fields, FieldTime)
 		}
 		if p.Type != nil {
 			if *p.Type != TypeNone {
@@ -278,6 +325,7 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (Entry, error) {
 			}
 			sets = append(sets, "type = ?")
 			args = append(args, nullString(string(*p.Type)))
+			fields = append(fields, FieldType)
 		}
 		if p.Project != nil {
 			var pid sql.NullInt64
@@ -290,6 +338,7 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (Entry, error) {
 			}
 			sets = append(sets, "project_id = ?")
 			args = append(args, pid)
+			fields = append(fields, FieldProject)
 		}
 		if p.Resolved != nil {
 			var v sql.NullString
@@ -304,6 +353,7 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (Entry, error) {
 			if !*p.Resolved {
 				sets = append(sets, "resolved_by = NULL")
 			}
+			fields = append(fields, FieldResolved)
 		}
 		args = append(args, id)
 		if _, err := tx.ExecContext(ctx, `UPDATE entries SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...); err != nil {
@@ -327,6 +377,7 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (Entry, error) {
 			if err := setTags(ctx, tx, id, without(norm, remove)); err != nil {
 				return err
 			}
+			fields = append(fields, FieldTags)
 		}
 		if p.Marks != nil || len(p.AddMarks) > 0 || len(p.RemoveMarks) > 0 {
 			marks := cur.Marks
@@ -337,6 +388,14 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (Entry, error) {
 			if err := s.setMarks(ctx, tx, id, without(uniqueSorted(marks), p.RemoveMarks)); err != nil {
 				return err
 			}
+			fields = append(fields, FieldMarks)
+		}
+		clock, err := s.tick(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if err := touchEntry(ctx, tx, id, clock, fields...); err != nil {
+			return err
 		}
 		return reindex(ctx, tx, id)
 	})
@@ -346,9 +405,24 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (Entry, error) {
 	return s.getByID(ctx, s.db, id)
 }
 
-// Delete permanently removes an entry and everything attached to it.
+// Delete permanently removes an entry and everything attached to it. A
+// tombstone records the delete so it reaches other devices.
 func (s *Store) Delete(ctx context.Context, id int64) error {
 	return s.db.Tx(ctx, func(tx *sql.Tx) error {
+		var uid string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM entries WHERE id = ?`, id).Scan(&uid); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: no entry #%d", ErrNotFound, id)
+			}
+			return database.Describe(err)
+		}
+		clock, err := s.tick(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if err := bury(ctx, tx, "entry", uid, clock); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM entries WHERE id = ?`, id)
 		if err != nil {
 			return database.Describe(fmt.Errorf("deleting entry #%d: %w", id, err))
@@ -369,8 +443,13 @@ func (s *Store) Restore(ctx context.Context, e Entry) (Entry, error) {
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
 		n := NewEntry{Body: e.Body, OccurredAt: e.OccurredAt, Type: e.Type, Project: e.Project,
 			CreateProject: true, Tags: e.Tags, Marks: e.Marks, Source: e.Source}
-		if _, err := s.insertEntry(ctx, tx, n, e.ID, e.UID); err != nil {
+		if _, err := s.insertEntry(ctx, tx, n, &e); err != nil {
 			return err
+		}
+		// The restore is a newer change than the delete, so it wins on every
+		// device the delete reached.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM tombstones WHERE uid = ?`, e.UID); err != nil {
+			return database.Describe(err)
 		}
 		var resolved sql.NullString
 		if e.ResolvedAt != nil {
@@ -388,10 +467,20 @@ func (s *Store) Restore(ctx context.Context, e Entry) (Entry, error) {
 		}
 		// Deleting this entry unlinked the entries it resolved; link back
 		// any that are still resolved and unlinked.
+		clock, err := s.tick(ctx, tx)
+		if err != nil {
+			return err
+		}
 		for _, rid := range e.Resolves {
-			if _, err := tx.ExecContext(ctx, `UPDATE entries SET resolved_by = ?
-				WHERE id = ? AND resolved_by IS NULL AND resolved_at IS NOT NULL`, e.ID, rid); err != nil {
+			res, err := tx.ExecContext(ctx, `UPDATE entries SET resolved_by = ?
+				WHERE id = ? AND resolved_by IS NULL AND resolved_at IS NOT NULL`, e.ID, rid)
+			if err != nil {
 				return database.Describe(err)
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				if err := touchEntry(ctx, tx, rid, clock, FieldResolved); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -538,7 +627,7 @@ func (s *Store) AddEntries(ctx context.Context, items []NewEntry) ([]int64, erro
 	ids := make([]int64, 0, len(items))
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
 		for _, n := range items {
-			id, err := s.insertEntry(ctx, tx, n, 0, "")
+			id, err := s.insertEntry(ctx, tx, n, nil)
 			if err != nil {
 				return err
 			}

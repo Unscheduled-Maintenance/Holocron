@@ -259,7 +259,7 @@ func renderDetail(w io.Writer, a *app.App, st style.Styler, e journal.Entry, md 
 		}
 	}
 	if len(e.Resolves) > 0 {
-		row("Resolves", refList(e.Resolves))
+		row("Resolves", strings.Join(e.ResolvesRefs, ", "))
 	}
 	if e.Source != nil {
 		src := e.Source.Type + " " + e.Source.ID
@@ -327,17 +327,8 @@ func (e *env) markdownRenderer() func(string) string {
 
 // resolvedBy describes the entry that resolved e, if one is linked.
 func resolvedBy(e journal.Entry) string {
-	if e.ResolvedBy == 0 {
+	if e.ResolvedByRef == "" {
 		return ""
 	}
-	return fmt.Sprintf(" by #%d", e.ResolvedBy)
-}
-
-// refList formats entry IDs as "#42, #43".
-func refList(ids []int64) string {
-	refs := make([]string, len(ids))
-	for i, id := range ids {
-		refs[i] = fmt.Sprintf("#%d", id)
-	}
-	return strings.Join(refs, ", ")
+	return " by " + e.ResolvedByRef
 }

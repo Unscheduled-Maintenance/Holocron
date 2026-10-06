@@ -13,6 +13,7 @@ import (
 
 // ReportRecord is a report someone recorded as sent.
 type ReportRecord struct {
+	UID        string
 	Kind       string
 	Range      timerange.Range
 	RecordedAt time.Time
@@ -31,9 +32,9 @@ func (r ReportRecord) Until() time.Time {
 
 // RecordReport remembers that a report of this kind covering rng was sent.
 func (s *Store) RecordReport(ctx context.Context, kind string, rng timerange.Range) (ReportRecord, error) {
-	rec := ReportRecord{Kind: kind, Range: rng, RecordedAt: s.now()}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO report_log (kind, range_start, range_end, recorded_at) VALUES (?, ?, ?, ?)`,
-		kind, nullTime(rng.Start), nullTime(rng.End), formatTime(rec.RecordedAt))
+	rec := ReportRecord{UID: NewUID(s.now()), Kind: kind, Range: rng, RecordedAt: s.now()}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO report_log (uid, kind, range_start, range_end, recorded_at, dirty) VALUES (?, ?, ?, ?, ?, 1)`,
+		rec.UID, kind, nullTime(rng.Start), nullTime(rng.End), formatTime(rec.RecordedAt))
 	if err != nil {
 		return ReportRecord{}, database.Describe(fmt.Errorf("recording report: %w", err))
 	}

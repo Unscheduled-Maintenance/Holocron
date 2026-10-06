@@ -46,6 +46,7 @@ The same shape is used by the export and by every command's `--json` output.
 ```json
 {
   "id": 12,
+  "ref": "#12",
   "uid": "01M45PNZRGYNXT02P679JQ1C76",
   "occurred_at": "2026-10-04T20:14:00Z",
   "recorded_local_time": "2026-10-05T09:14:00+13:00",
@@ -65,7 +66,8 @@ The same shape is used by the export and by every command's `--json` output.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `id` | integer | The short number shown as `#12`. Never reused within an archive. |
+| `id` | integer | This archive's internal number for the entry, unique within the file; other fields (`resolved_by`, `resolves`) refer to it. Equal to the number in `ref` unless sync has given the entry a device label. |
+| `ref` | string | The reference people see and type: `#12`, or `#12a` for an entry numbered by device `a` when sync is used ([ADR 0007](adr/0007-multi-device-sync.md)). Never reused. Added in Holocron 0.4. |
 | `uid` | string | ULID; globally unique and stable across exports. |
 | `occurred_at` | timestamp | When the work happened. |
 | `recorded_local_time` | string | The same instant in the UTC offset where it was captured. |
@@ -103,6 +105,7 @@ Produced by `holocron report <kind> --format json`.
           "type": "accomplishment",
           "occurred_at": "2026-10-04T20:14:00Z",
           "entry_ids": [12],
+          "entry_refs": ["#12"],
           "reasons": ["marked staff", "type accomplishment"]
         }
       ],
@@ -110,7 +113,7 @@ Produced by `holocron report <kind> --format json`.
     }
   ],
   "sources": [
-    {"id": 12, "uid": "01M45…", "occurred_at": "2026-10-04T20:14:00Z", "project": "AWS", "type": "accomplishment", "body": "Enabled IAM Access Analyzer in all AWS regions"}
+    {"id": 12, "ref": "#12", "uid": "01M45…", "occurred_at": "2026-10-04T20:14:00Z", "project": "AWS", "type": "accomplishment", "body": "Enabled IAM Access Analyzer in all AWS regions"}
   ]
 }
 ```
@@ -119,7 +122,8 @@ Produced by `holocron report <kind> --format json`.
 |---|---|
 | `range.start`, `range.end` | Half-open interval `[start, end)`; `null` when unbounded. |
 | `sections[].key` | Stable identifier: `completed`, `decisions`, `problems`, `upcoming`, `cross-team`, `discuss`, `wins`, `follow-ups`, `friction`, `timeline`, `open`, `themes`, or `project:<name>`. |
-| `items[].entry_ids` | Every entry the item was built from (provenance). |
+| `items[].entry_ids` | Every entry the item was built from (provenance), as the `id`s used in `sources`. |
+| `items[].entry_refs` | The same entries as references (`#12`, `#12a`). Added in Holocron 0.4. |
 | `items[].reasons` | Why the item was selected. |
 | `items[].open` | `true` for unresolved problems and follow-ups (omitted otherwise). |
 | `omitted`, `omitted_entry_ids` | Lower-priority entries left out of the section. |

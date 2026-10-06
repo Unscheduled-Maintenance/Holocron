@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -272,5 +273,46 @@ func TestOpenReadOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(dest + "-wal"); err == nil {
 		t.Fatal("read-only open left a WAL file")
+	}
+}
+
+func TestSyncGroundworkMigrationKeepsNumbers(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "h.db")
+	db, err := Open(ctx, path, Options{NoMigrate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	all := Migrations()
+	if err := db.migrate(ctx, all[:3], ""); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 3; i++ {
+		if _, err := db.Exec(`INSERT INTO entries (uid, occurred_at, body, created_at, updated_at) VALUES (?, '2026-10-01T09:00:00.000Z', 'x', '2026-10-01T09:00:00.000Z', '2026-10-01T09:00:00.000Z')`,
+			fmt.Sprintf("UID%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`DELETE FROM entries WHERE id = 3`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO report_log (kind, recorded_at) VALUES ('staff', '2026-10-01T09:00:00.000Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.migrate(ctx, all, ""); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM entries WHERE num = id`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("numbers after upgrade: %d match their IDs (%v)", n, err)
+	}
+	var next string
+	if err := db.QueryRow(`SELECT value FROM sync_meta WHERE key = 'plain_next'`).Scan(&next); err != nil || next != "4" {
+		t.Fatalf("plain_next = %q, %v (the deleted #3 must not be reissued)", next, err)
+	}
+	var uid string
+	if err := db.QueryRow(`SELECT uid FROM report_log`).Scan(&uid); err != nil || len(uid) != 32 {
+		t.Fatalf("report log uid = %q, %v", uid, err)
 	}
 }

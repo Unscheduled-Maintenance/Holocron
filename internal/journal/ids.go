@@ -3,6 +3,7 @@ package journal
 import (
 	"crypto/rand"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -10,9 +11,9 @@ import (
 
 // Every record has two identifiers:
 //
-//   - a small integer ID ("#42") for people to type. SQLite AUTOINCREMENT
-//     never reuses a number, even after deletion, so a short ID can never
-//     silently start referring to a different record.
+//   - a small number ("#42", or "#12a" once sync labels the device) for
+//     people to type. Numbers are never reissued, even after deletion, so a
+//     short reference can never silently start meaning a different record.
 //   - a ULID (26 characters, time-ordered, globally unique) for exports,
 //     provenance and any future merging of archives.
 //
@@ -67,24 +68,44 @@ func IsUID(s string) bool {
 	return true
 }
 
-// ParseRef interprets an entry reference typed by a person: "42", "#42" or
-// a full ULID. It returns either a numeric ID or a UID.
-func ParseRef(ref string) (id int64, uid string, err error) {
-	r := strings.TrimSpace(ref)
-	r = strings.TrimPrefix(r, "#")
-	if r == "" {
-		return 0, "", fmt.Errorf("%w: empty entry reference", ErrInvalid)
+// EntryRef is an entry reference typed by a person: a number with an
+// optional device label ("42", "#42", "#12a"), or a full ULID.
+type EntryRef struct {
+	Num   int64
+	Label string
+	UID   string
+}
+
+func (r EntryRef) String() string {
+	if r.UID != "" {
+		return "with UID " + r.UID
 	}
-	if n, perr := strconv.ParseInt(r, 10, 64); perr == nil {
-		if n <= 0 {
-			return 0, "", fmt.Errorf("%w: entry IDs are positive numbers", ErrInvalid)
-		}
-		return n, "", nil
+	return FormatRef(r.Num, r.Label)
+}
+
+// FormatRef renders an entry number: "#42", or "#12a" for a number issued
+// by device a.
+func FormatRef(num int64, label string) string { return "#" + strconv.FormatInt(num, 10) + label }
+
+var refRe = regexp.MustCompile(`^(\d+)([a-z]*)$`)
+
+// ParseRef interprets an entry reference typed by a person.
+func ParseRef(ref string) (EntryRef, error) {
+	r := strings.TrimPrefix(strings.TrimSpace(ref), "#")
+	if r == "" {
+		return EntryRef{}, fmt.Errorf("%w: empty entry reference", ErrInvalid)
 	}
 	if IsUID(r) {
-		return 0, strings.ToUpper(r), nil
+		return EntryRef{UID: strings.ToUpper(r)}, nil
 	}
-	return 0, "", fmt.Errorf("%w: %q is not an entry ID (use the number shown as #42, or a full UID)", ErrInvalid, ref)
+	if m := refRe.FindStringSubmatch(strings.ToLower(r)); m != nil {
+		n, err := strconv.ParseInt(m[1], 10, 64)
+		if err != nil || n <= 0 {
+			return EntryRef{}, fmt.Errorf("%w: entry numbers are positive numbers", ErrInvalid)
+		}
+		return EntryRef{Num: n, Label: m[2]}, nil
+	}
+	return EntryRef{}, fmt.Errorf("%w: %q is not an entry reference (use the number shown, such as #42 or #12a, or a full UID)", ErrInvalid, ref)
 }
 
 // Timestamps are stored as fixed-width UTC strings so that lexical order is

@@ -2,6 +2,7 @@ package ai
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func TestCitationsAndProvenance(t *testing.T) {
 	rep := sampleReport()
 	text := "# Update\n- Analyzer on everywhere [#3]\n- Something invented [#42] [#3]"
 	cited, unknown := Citations(text, rep)
-	if len(cited) != 1 || cited[0] != 3 || len(unknown) != 1 || unknown[0] != 42 {
+	if len(cited) != 1 || cited[0] != 3 || len(unknown) != 1 || unknown[0] != "#42" {
 		t.Fatalf("cited=%v unknown=%v", cited, unknown)
 	}
 	p := Provenance(text, rep, "fake (model)")
@@ -72,5 +73,22 @@ func TestNewProvider(t *testing.T) {
 	}
 	if _, err := New(config.AIConfig{Provider: "skynet"}, env(nil)); err == nil {
 		t.Fatal("unknown provider accepted")
+	}
+}
+
+func TestCitationsWithLabels(t *testing.T) {
+	rep := sampleReport()
+	e := rep.Entries[3]
+	e.Num, e.Label = 12, "a"
+	rep.Entries[3] = e
+	cited, unknown := Citations("Done [#12a] and [#12b] [#3]", rep)
+	if len(cited) != 1 || cited[0] != 3 || !reflect.DeepEqual(unknown, []string{"#12b", "#3"}) {
+		t.Fatalf("cited=%v unknown=%v", cited, unknown)
+	}
+	if req := BuildRequest(rep); !strings.Contains(req.Prompt, `<entry id="#12a"`) {
+		t.Error("prompt should identify entries by reference")
+	}
+	if p := Provenance("Done [#12a]", rep, "fake"); !strings.Contains(p, "- [x] #12a Enabled") {
+		t.Errorf("provenance:\n%s", p)
 	}
 }
