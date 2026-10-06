@@ -108,7 +108,7 @@ are optional.
 | Flag | Meaning |
 |---|---|
 | `-p, --project NAME` | Project name or alias. Unknown projects are created on first use (Holocron tells you). |
-| `--type TYPE` | One of `work`, `accomplishment`, `decision`, `investigation`, `problem`, `follow-up`, `note`. Unique prefixes work: `--type dec`. |
+| `--type TYPE` | One of `work`, `accomplishment`, `decision`, `investigation`, `problem`, `follow-up`, `note`. Unique prefixes and [aliases](#type-aliases) work: `--type dec`, `--type win`. |
 | `-t, --tag TAG` | Repeatable or comma-separated. Tags are lower-cased and may contain letters, digits, `-`, `_`, `.`, `/` and `:`. |
 | `--mark MARK` | Report mark: `staff`, `one-on-one`, `quarterly`, `important`, `cross-team` (see [Reports](#reports)). |
 | `--at WHEN` | When it happened: `14:30`, `2:30pm`, `yesterday 16:00`, `2026-10-02 09:15`, `-2h`, `90m ago`. A date without a time means noon. Default: now. |
@@ -137,6 +137,27 @@ Mark a problem or follow-up done with `holocron resolve <id>` (or `x` in the
 TUI). Any entry can be pulled into a report regardless of type with a
 [report mark](#report-marks).
 
+### Type aliases
+
+Aliases are shorthand for a type. Two are built in: `win` for
+`accomplishment` and `look` for `investigation`. They work anywhere you type
+a type: `holocron add "Win: rotated the keys"`, `--type look`, filters such
+as `holocron list --type win`, and the editor form's `type` field. Entries
+always store and show the real type, so listings, reports and exports never
+see the alias.
+
+Add your own, or remove a built-in one, in the
+[configuration file](#configuration-and-storage-locations):
+
+```toml
+[type_aliases]
+ship = "accomplishment"
+look = ""                    # removes the built-in alias
+```
+
+Aliases are matched exactly and ignore letter case. An alias may contain
+letters, digits, `-` and `_`, and may not be a type name.
+
 ### Shorthand
 
 Inside the entry text, `+project` and `#tag` set metadata quickly:
@@ -159,8 +180,10 @@ The rules are deliberately simple and predictable:
   removed: `Decision: keep weekly deploy windows` is stored as the decision
   "keep weekly deploy windows". This works for every type (`Work:`,
   `Accomplishment:`, `Decision:`, `Investigation:`, `Problem:`, `Follow-up:`,
-  `Note:`), in any letter case. If `--type` names a different type, the
-  prefix is treated as ordinary text and kept.
+  `Note:`), in any letter case, and for [type aliases](#type-aliases):
+  `Win: shipped it` is stored as the accomplishment "shipped it". If
+  `--type` names a different type, the prefix is treated as ordinary text
+  and kept.
 
 > **Quote text that contains `#`.** Bash, Zsh and PowerShell treat an unquoted
 > word starting with `#` as a comment and silently drop it. Inside quotes it is
@@ -559,6 +582,10 @@ clock = "24h"                # or "12h"
 [capture]
 shorthand = true             # +project / #tag parsing
 create_projects = true       # create unknown projects on first use
+
+[type_aliases]               # shorthand for entry types (see Type aliases)
+win = "accomplishment"       # built in
+look = "investigation"       # built in; set to "" to remove
 
 [reports]
 max_items = 8

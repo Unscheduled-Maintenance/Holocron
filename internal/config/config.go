@@ -18,6 +18,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/Unscheduled-Maintenance/Holocron/internal/journal"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/timerange"
 )
 
@@ -38,6 +39,11 @@ type Config struct {
 	WeekStart string `toml:"week_start"`
 	// Clock is "24h" or "12h".
 	Clock string `toml:"clock"`
+
+	// TypeAliases maps shorthand names to entry types ("win" =
+	// "accomplishment"). They add to the built-in aliases; an empty value
+	// removes one.
+	TypeAliases map[string]string `toml:"type_aliases"`
 
 	Capture CaptureConfig `toml:"capture"`
 	Reports ReportsConfig `toml:"reports"`
@@ -92,9 +98,10 @@ type AIConfig struct {
 func Default() Config {
 	shorthand, create := true, true
 	return Config{
-		WeekStart: "monday",
-		Clock:     "24h",
-		Capture:   CaptureConfig{Shorthand: &shorthand, CreateProjects: &create},
+		WeekStart:   "monday",
+		Clock:       "24h",
+		TypeAliases: journal.DefaultTypeAliases(),
+		Capture:     CaptureConfig{Shorthand: &shorthand, CreateProjects: &create},
 		Reports: ReportsConfig{
 			MaxItems:      8,
 			OneOnOneRange: "14d",
@@ -128,6 +135,9 @@ func (c Config) Validate() error {
 	case "", "24h", "12h":
 	default:
 		errs = append(errs, fmt.Errorf("clock: must be \"24h\" or \"12h\", got %q", c.Clock))
+	}
+	if _, err := journal.NewTypeAliases(c.TypeAliases); err != nil {
+		errs = append(errs, fmt.Errorf("type_aliases: %w", err))
 	}
 	if c.Reports.MaxItems < 0 {
 		errs = append(errs, fmt.Errorf("reports.max_items: must not be negative"))
@@ -315,6 +325,14 @@ const Template = `# Holocron configuration.
 [capture]
 # shorthand = true          # parse +project and #tag in entry text
 # create_projects = true    # create unknown projects on first use
+
+[type_aliases]
+# Shorthand for entry types, usable wherever a type is typed ("Win: ...",
+# --type win). Entries always store the real type. These add to the
+# built-in aliases below; set one to "" to remove it.
+# win = "accomplishment"    # built in
+# look = "investigation"    # built in
+# ship = "accomplishment"
 
 [reports]
 # max_items = 8             # bullets per report section

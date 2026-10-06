@@ -39,6 +39,7 @@ type App struct {
 
 	now       func() time.Time
 	weekStart time.Weekday
+	types     journal.TypeAliases
 }
 
 // LoadConfig reads configuration without opening the database.
@@ -70,7 +71,9 @@ func newApp(cfg config.Config, paths config.Paths, db *database.DB, opts Options
 		now = time.Now
 	}
 	ws, _ := timerange.ParseWeekday(cfg.WeekStart)
-	a := &App{Config: cfg, Paths: paths, DB: db, Loc: loc, now: now, weekStart: ws}
+	// Validated with the rest of the configuration in config.Load.
+	types, _ := journal.NewTypeAliases(cfg.TypeAliases)
+	a := &App{Config: cfg, Paths: paths, DB: db, Loc: loc, now: now, weekStart: ws, types: types}
 	a.Store = journal.NewStore(db, journal.WithClock(now), journal.WithLocation(loc))
 	return a
 }
@@ -88,6 +91,9 @@ func (a *App) Now() time.Time { return a.now().In(a.Loc) }
 
 // Clock returns a date-range clock for the current moment.
 func (a *App) Clock() timerange.Clock { return timerange.NewClock(a.now(), a.Loc, a.weekStart) }
+
+// ParseType parses an entry type, accepting the configured type aliases.
+func (a *App) ParseType(s string) (journal.Type, error) { return a.types.Parse(s) }
 
 // TimeLayout returns the configured time-of-day layout.
 func (a *App) TimeLayout() string {
@@ -121,7 +127,7 @@ func (a *App) Capture(ctx context.Context, in CaptureInput) (CaptureResult, erro
 	var sh journal.Capture
 	if a.Config.ShorthandEnabled() && !in.Raw {
 		var err error
-		sh, err = journal.ParseShorthand(text)
+		sh, err = journal.ParseShorthand(text, a.types)
 		if err != nil {
 			return CaptureResult{}, err
 		}
@@ -139,7 +145,7 @@ func (a *App) Capture(ctx context.Context, in CaptureInput) (CaptureResult, erro
 	}
 	typ := sh.Type
 	if in.Type != "" {
-		t, err := journal.ParseType(in.Type)
+		t, err := a.ParseType(in.Type)
 		if err != nil {
 			return CaptureResult{}, err
 		}

@@ -65,7 +65,7 @@ With flags, the change is applied directly, which suits scripts.`,
 					p.Project = &empty
 				}
 				if fs.Changed("type") {
-					t, err := journal.ParseType(typ)
+					t, err := a.ParseType(typ)
 					if err != nil {
 						return err
 					}

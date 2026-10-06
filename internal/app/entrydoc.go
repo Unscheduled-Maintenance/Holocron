@@ -189,7 +189,7 @@ func (a *App) PatchFromDoc(e journal.Entry, d EntryDoc) (journal.Patch, error) {
 		p.CreateProject = a.Config.CreateProjectsEnabled()
 	}
 	if d.Type != orig.Type {
-		t, err := journal.ParseType(d.Type)
+		t, err := a.ParseType(d.Type)
 		if err != nil {
 			return p, err
 		}

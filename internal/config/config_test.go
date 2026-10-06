@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -92,6 +93,8 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 		"bad provider": "[ai]\nprovider = \"skynet\"\n",
 		"syntax error": "week_start = \n",
 		"wrong type":   "[reports]\nmax_items = \"lots\"\n",
+		"alias target": "[type_aliases]\nwin = \"victory\"\n",
+		"alias name":   "[type_aliases]\ndecision = \"note\"\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -103,6 +106,32 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 				t.Fatalf("Load accepted %q", content)
 			}
 		})
+	}
+}
+
+func TestTypeAliases(t *testing.T) {
+	dir := isolate(t)
+	defaults := Default().TypeAliases
+	if !reflect.DeepEqual(defaults, map[string]string{"win": "accomplishment", "look": "investigation"}) {
+		t.Fatalf("default type aliases = %v", defaults)
+	}
+
+	// Configured aliases add to the defaults, and "" removes one.
+	file := filepath.Join(dir, "aliases.toml")
+	content := "[type_aliases]\nship = \"accomplishment\"\nlook = \"\"\n"
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(file, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"win": "accomplishment", "look": "", "ship": "accomplishment"}
+	if !reflect.DeepEqual(cfg.TypeAliases, want) {
+		t.Fatalf("type aliases = %v, want %v", cfg.TypeAliases, want)
+	}
+	if !reflect.DeepEqual(Default().TypeAliases, defaults) {
+		t.Fatal("loading a config must not change the defaults")
 	}
 }
 
