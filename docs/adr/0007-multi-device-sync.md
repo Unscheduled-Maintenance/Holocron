@@ -4,8 +4,7 @@ Date: 2026-10-06
 
 ## Status
 
-Proposed. Amends [0002](0002-identifiers.md) (entry numbers) once accepted.
-Tracked in #16.
+Accepted. Amends [0002](0002-identifiers.md) (entry numbers). Tracked in #16.
 
 ## Context
 

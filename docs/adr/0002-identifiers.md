@@ -4,7 +4,8 @@ Date: 2026-10-05
 
 ## Status
 
-Accepted
+Accepted. Amended by [0007](0007-multi-device-sync.md): with sync enabled, new
+entries are numbered per device (`#12a`); existing numbers keep their meaning.
 
 ## Context
 
