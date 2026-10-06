@@ -87,3 +87,48 @@ func TestSyncCommands(t *testing.T) {
 	mustContain(t, h.ok("sync", "status"), "not set up")
 	mustContain(t, h.ok("add", "After sync was turned off"), "#3a")
 }
+
+func TestSyncReceiveOnly(t *testing.T) {
+	h := newHarness(t)
+	folder := filepath.Join(h.dir, "OneDrive", "Holocron")
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if r := h.run("sync", "mode"); r.code != ExitUsage {
+		t.Fatalf("mode before init: %+v", r)
+	}
+	out := h.ok("sync", "init", folder, "--name", "home")
+	key := regexp.MustCompile(`AGE-SECRET-KEY-PQ-1[A-Z0-9]+`).FindString(out)
+	mustContain(t, h.ok("sync", "mode"), "two-way")
+	h.ok("add", "Personal note")
+
+	work := filepath.Join(h.dir, "work.db")
+	atWork := func(args ...string) string { return h.ok(append([]string{"--db", work}, args...)...) }
+	r := h.runIn(key+"\n", "--db", work, "sync", "join", folder, "--key", "--name", "work", "--receive-only")
+	if r.code != 0 {
+		t.Fatalf("join: %+v", r)
+	}
+	mustContain(t, r.out, "Joined", "receive-only")
+	mustContain(t, atWork("show", "1a"), "Personal note")
+	atWork("add", "Work note")
+	mustContain(t, atWork("sync", "mode"), "receive-only")
+	mustContain(t, atWork("sync", "status"), "receive-only")
+	if strings.Contains(atWork("sync", "status"), "waiting") {
+		t.Fatal("status shows waiting changes on a receive-only computer")
+	}
+	mustContain(t, atWork("doctor"), "receive-only")
+	if strings.Contains(h.ok("search", "note"), "Work note") {
+		t.Fatal("a receive-only computer's note reached the other computer")
+	}
+
+	if r := h.run("--db", work, "sync", "mode", "two-way"); r.code != ExitUsage {
+		t.Fatalf("two-way without --yes: %+v", r)
+	}
+	if r := h.run("--db", work, "sync", "mode", "sideways"); r.code != ExitUsage {
+		t.Fatalf("unknown mode: %+v", r)
+	}
+	mustContain(t, atWork("sync", "mode", "two-way", "--yes"), "two ways")
+	mustContain(t, h.ok("search", "note"), "Work note")
+	mustContain(t, atWork("sync", "mode", "receive-only"), "receive-only")
+	mustContain(t, atWork("sync", "mode", "receive-only"), "already receive-only")
+}

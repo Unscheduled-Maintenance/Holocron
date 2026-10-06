@@ -152,10 +152,10 @@ func TestInitJoinAndSync(t *testing.T) {
 	// b already has an entry of its own, which takes b's label on joining.
 	b := newComputer(t, t0.Add(time.Hour))
 	mine := b.add("b's own")
-	if _, err := b.sync.Join(ctx, dir, Unlock{Passphrase: "wrong passphrase"}, "home"); err == nil {
+	if _, err := b.sync.Join(ctx, dir, Unlock{Passphrase: "wrong passphrase"}, JoinOptions{Name: "home"}); err == nil {
 		t.Fatal("a wrong passphrase must not unlock")
 	}
-	join, err := b.sync.Join(ctx, dir, Unlock{Passphrase: "correct horse battery"}, "home")
+	join, err := b.sync.Join(ctx, dir, Unlock{Passphrase: "correct horse battery"}, JoinOptions{Name: "home"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,16 +199,16 @@ func TestInitJoinAndSync(t *testing.T) {
 
 	// Other unlock methods work on further computers.
 	c := newComputer(t, t0.Add(2*time.Hour))
-	if _, err := c.sync.Join(ctx, dir, Unlock{SSHKey: private}, "spare"); err != nil {
+	if _, err := c.sync.Join(ctx, dir, Unlock{SSHKey: private}, JoinOptions{Name: "spare"}); err != nil {
 		t.Fatalf("join with SSH key: %v", err)
 	}
 	d := newComputer(t, t0.Add(3*time.Hour))
 	d.sync.KeyCommand = keyCommandFor(t, res.Key)
-	if j, err := d.sync.Join(ctx, dir, Unlock{KeyCommand: true}, "tablet"); err != nil || j.Label != "d" {
+	if j, err := d.sync.Join(ctx, dir, Unlock{KeyCommand: true}, JoinOptions{Name: "tablet"}); err != nil || j.Label != "d" {
 		t.Fatalf("join with key_command: %+v, %v", j, err)
 	}
 	e := newComputer(t, t0.Add(4*time.Hour))
-	if _, err := e.sync.Join(ctx, dir, Unlock{Key: res.Key}, ""); err != nil {
+	if _, err := e.sync.Join(ctx, dir, Unlock{Key: res.Key}, JoinOptions{}); err != nil {
 		t.Fatalf("join with the key: %v", err)
 	}
 	if e.get("3b").Body != "b new" {
@@ -230,7 +230,7 @@ func TestLockedAndKeyCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := newComputer(t, t0)
-	if _, err := b.sync.Join(ctx, dir, Unlock{Key: res.Key}, ""); err != nil {
+	if _, err := b.sync.Join(ctx, dir, Unlock{Key: res.Key}, JoinOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	// A new process on b with an empty keychain is locked once there is
@@ -274,7 +274,7 @@ func TestCompaction(t *testing.T) {
 	a := newComputer(t, t0)
 	res, _ := a.sync.Init(ctx, dir, InitOptions{})
 	b := newComputer(t, t0)
-	if _, err := b.sync.Join(ctx, dir, Unlock{Key: res.Key}, ""); err != nil {
+	if _, err := b.sync.Join(ctx, dir, Unlock{Key: res.Key}, JoinOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	selfA, _ := a.store.SelfDevice(ctx)
@@ -321,7 +321,7 @@ func TestRotateKey(t *testing.T) {
 	a := newComputer(t, t0)
 	res, _ := a.sync.Init(ctx, dir, InitOptions{})
 	b := newComputer(t, t0)
-	if _, err := b.sync.Join(ctx, dir, Unlock{Key: res.Key}, ""); err != nil {
+	if _, err := b.sync.Join(ctx, dir, Unlock{Key: res.Key}, JoinOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	b.add("before rotation")
@@ -362,7 +362,7 @@ func TestLabelClashAndRelabel(t *testing.T) {
 	a := newComputer(t, t0)
 	res, _ := a.sync.Init(ctx, dir, InitOptions{})
 	b := newComputer(t, t0)
-	if _, err := b.sync.Join(ctx, dir, Unlock{Key: res.Key}, "b"); err != nil {
+	if _, err := b.sync.Join(ctx, dir, Unlock{Key: res.Key}, JoinOptions{Name: "b"}); err != nil {
 		t.Fatal(err)
 	}
 	key, _ := parseDataKey(res.Key)
@@ -420,5 +420,88 @@ func TestOff(t *testing.T) {
 	}
 	if got := a.add("after off").Ref(); got != "#1a" {
 		t.Fatalf("numbering after off = %s", got)
+	}
+}
+
+func TestReceiveOnly(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	home := newComputer(t, t0)
+	home.add("home before sync")
+	res, err := home.sync.Init(ctx, dir, InitOptions{Name: "home"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := newComputer(t, t0.Add(time.Hour))
+	secret := work.add("work before sync")
+	if _, err := work.sync.Join(ctx, dir, Unlock{Key: res.Key}, JoinOptions{Name: "work", ReceiveOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !mustConfig(t, work).ReceiveOnly || mustConfig(t, home).ReceiveOnly {
+		t.Fatal("receive-only recorded on the wrong computer")
+	}
+	selfWork, _ := work.store.SelfDevice(ctx)
+	f := folderAt(dir)
+	published := func() int {
+		t.Helper()
+		files, err := f.listRecordFiles(selfWork.UID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(files)
+	}
+	if n := published(); n != 0 {
+		t.Fatalf("a receive-only join published %d files", n)
+	}
+	if _, err := os.Stat(filepath.Join(f.deviceDir(selfWork.UID), "device.age")); err != nil {
+		t.Fatalf("device.age must still be published: %v", err)
+	}
+
+	// Home's entries arrive at work; work's never reach home.
+	if work.get("1").Body != "home before sync" {
+		t.Fatal("work did not merge home's entry")
+	}
+	work.later(time.Minute).add("work after sync")
+	if r := work.push(); r.Records != 0 {
+		t.Fatalf("receive-only push = %+v", r)
+	}
+	if err := work.sync.Compact(ctx); err != nil || published() != 0 {
+		t.Fatalf("compact published: %v, %d files", err, published())
+	}
+	home.later(2 * time.Hour).add("home after sync")
+	home.push()
+	if r := home.pull(); r.Applied.EntriesAdded != 0 {
+		t.Fatalf("home merged %+v from a receive-only computer", r.Applied)
+	}
+	if r := work.later(3 * time.Hour).pull(); r.Applied.EntriesAdded != 1 {
+		t.Fatalf("work pulled %+v", r.Applied)
+	}
+	if st, err := work.sync.Status(ctx); err != nil || !st.ReceiveOnly {
+		t.Fatalf("status = %+v, %v", st, err)
+	}
+
+	// Two-way publishes everything; receive-only again withdraws it.
+	if err := work.sync.SetReceiveOnly(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if published() == 0 {
+		t.Fatal("two-way did not publish")
+	}
+	home.later(4 * time.Hour).pull()
+	if home.get(secret.UID).Body != "work before sync" {
+		t.Fatal("home did not get work's entries after switching to two-way")
+	}
+	if err := work.sync.SetReceiveOnly(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if n := published(); n != 0 {
+		t.Fatalf("%d files left after switching back to receive-only", n)
+	}
+	// Off forgets the mode.
+	if err := work.sync.Off(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := work.store.Meta(ctx, metaReceive); v != "" {
+		t.Fatalf("receive-only left after off: %q", v)
 	}
 }

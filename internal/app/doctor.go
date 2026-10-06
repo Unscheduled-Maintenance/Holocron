@@ -225,7 +225,9 @@ func checkSync(ctx context.Context, cfg config.Config, paths config.Paths, opts 
 		return []Check{{Name: "sync", Status: CheckWarn, Detail: fmt.Sprintf("device %s, but the key is not available here; run `holocron sync unlock`", st.Label)}}
 	}
 	detail := fmt.Sprintf("device %s with %d %s in %s", st.Label, len(st.Devices), map[bool]string{true: "computer", false: "computers"}[len(st.Devices) == 1], st.Folder)
-	if st.Pending > 0 {
+	if st.ReceiveOnly {
+		detail += "; receive-only (publishes nothing)"
+	} else if st.Pending > 0 {
 		detail += fmt.Sprintf("; %d %s waiting to be published", st.Pending, map[bool]string{true: "change", false: "changes"}[st.Pending == 1])
 	}
 	if st.KeyCommand {

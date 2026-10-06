@@ -29,6 +29,10 @@ Once set up, every command syncs by itself: it merges what other computers
 published before it starts and publishes this computer's changes when it
 finishes. Running "holocron sync" does both now and reports the result.
 
+A computer can be receive-only: it merges the other computers' changes but
+never publishes its own, so notes made there stay there. Use --receive-only
+with init or join, or "holocron sync mode" later.
+
 Each computer gets a letter: new entries are numbered #12a on the first
 computer, #12b on the second, so a number always means the same entry
 everywhere. Entries made before sync was set up keep their plain numbers.
@@ -69,7 +73,7 @@ See docs/adr/0007-multi-device-sync.md for the design.`,
 		},
 	}
 	cmd.AddCommand(newSyncInitCmd(e), newSyncJoinCmd(e), newSyncUnlockCmd(e), newSyncStatusCmd(e),
-		newSyncCompactCmd(e), newSyncRelabelCmd(e), newSyncKeyCmd(e), newSyncOffCmd(e))
+		newSyncCompactCmd(e), newSyncRelabelCmd(e), newSyncModeCmd(e), newSyncKeyCmd(e), newSyncOffCmd(e))
 	return cmd
 }
 
@@ -146,7 +150,7 @@ func readSecret(e *env, prompt string) (string, error) {
 }
 
 func newSyncInitCmd(e *env) *cobra.Command {
-	var passphrase bool
+	var passphrase, receiveOnly bool
 	var sshKeys []string
 	var name string
 	cmd := &cobra.Command{
@@ -173,7 +177,7 @@ sync.key_command in the config, for example:
 			if err != nil {
 				return err
 			}
-			opts := devsync.InitOptions{Name: name}
+			opts := devsync.InitOptions{Name: name, ReceiveOnly: receiveOnly}
 			if passphrase {
 				if opts.Passphrase, err = choosePassphrase(e); err != nil {
 					return err
@@ -193,6 +197,9 @@ sync.key_command in the config, for example:
 			st := e.out()
 			fmt.Fprintf(e.io.Out, "%s This computer is device %q; new entries will be numbered like #1%s.\n\n",
 				st.Success("Sync is set up."), res.Label, res.Label)
+			if receiveOnly {
+				fmt.Fprintf(e.io.Out, "%s\n\n", receiveOnlyNote)
+			}
 			fmt.Fprintf(e.io.Out, "Sync key (shown once; keep it in your password manager):\n\n  %s\n\n", res.Key)
 			fmt.Fprintf(e.io.Out, "On each other computer run:  holocron sync join %s\n", args[0])
 			return nil
@@ -201,12 +208,14 @@ sync.key_command in the config, for example:
 	cmd.Flags().BoolVar(&passphrase, "passphrase", false, "also allow unlocking with a passphrase")
 	cmd.Flags().StringSliceVar(&sshKeys, "ssh-key", nil, "also allow unlocking with this SSH public key file (repeatable)")
 	cmd.Flags().StringVar(&name, "name", "", "a name for this computer (default: its host name)")
+	cmd.Flags().BoolVar(&receiveOnly, "receive-only", false, receiveOnlyFlag)
 	return cmd
 }
 
 func newSyncJoinCmd(e *env) *cobra.Command {
 	f := &unlockFlags{}
 	var name string
+	var receiveOnly bool
 	cmd := &cobra.Command{
 		Use:   "join <folder>",
 		Short: "Join a sync folder set up on another computer",
@@ -216,7 +225,10 @@ archive keep their digits and take its letter (#3 becomes #3b), then
 everything in the folder is merged in.
 
 The key is asked for unless sync.key_command is configured; or unlock with
---passphrase or --ssh-key if those were set up.`,
+--passphrase or --ssh-key if those were set up.
+
+With --receive-only, this computer merges the folder's changes but never
+publishes its own entries.`,
 		Example: "  holocron sync join ~/OneDrive/Holocron\n  holocron sync join ~/OneDrive/Holocron --passphrase",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -229,7 +241,7 @@ The key is asked for unless sync.key_command is configured; or unlock with
 			if err != nil {
 				return err
 			}
-			res, err := a.Sync.Join(ctx, expandPath(args[0]), u, name)
+			res, err := a.Sync.Join(ctx, expandPath(args[0]), u, devsync.JoinOptions{Name: name, ReceiveOnly: receiveOnly})
 			if err != nil {
 				return err
 			}
@@ -239,6 +251,9 @@ The key is asked for unless sync.key_command is configured; or unlock with
 				fmt.Fprintf(e.io.Out, "%s here took this computer's letter, keeping their digits (%s → %s, ...).\n",
 					count(len(res.Renumbered), "entry", "entries"), res.Renumbered[0].From, res.Renumbered[0].To)
 			}
+			if receiveOnly {
+				fmt.Fprintln(e.io.Out, receiveOnlyNote)
+			}
 			for _, w := range res.Pull.Warnings {
 				e.note("%s %s", e.errStyle().Warn("warning:"), w)
 			}
@@ -247,6 +262,7 @@ The key is asked for unless sync.key_command is configured; or unlock with
 	}
 	f.register(cmd)
 	cmd.Flags().StringVar(&name, "name", "", "a name for this computer (default: its host name)")
+	cmd.Flags().BoolVar(&receiveOnly, "receive-only", false, receiveOnlyFlag)
 	return cmd
 }
 
@@ -326,17 +342,22 @@ func printSyncStatus(e *env, a *app.App, s devsync.Status) {
 	}
 	fmt.Fprintf(w, "%s  %s\n", st.Dim("folder  "), s.Folder)
 	fmt.Fprintf(w, "%s  %s\n", st.Dim("this    "), "device "+s.Label)
+	if s.ReceiveOnly {
+		fmt.Fprintf(w, "%s  %s\n", st.Dim("mode    "), "receive-only: merges other computers' changes, publishes none")
+	}
 	if s.Problem != "" {
 		fmt.Fprintf(w, "%s  %s\n", st.Dim("problem "), st.Warn(s.Problem))
 	}
 	if s.Locked {
 		fmt.Fprintf(w, "%s  %s\n", st.Dim("key     "), st.Warn("locked: run `holocron sync unlock`"))
 	}
-	pending := "nothing"
-	if s.Pending > 0 {
-		pending = count(s.Pending, "change", "changes") + " not yet published (published by the next command, or `holocron sync`)"
+	if !s.ReceiveOnly {
+		pending := "nothing"
+		if s.Pending > 0 {
+			pending = count(s.Pending, "change", "changes") + " not yet published (published by the next command, or `holocron sync`)"
+		}
+		fmt.Fprintf(w, "%s  %s\n", st.Dim("waiting "), pending)
 	}
-	fmt.Fprintf(w, "%s  %s\n", st.Dim("waiting "), pending)
 	fmt.Fprintf(w, "%s  merged %s · published %s\n", st.Dim("last    "), when(s.LastPull), when(s.LastPush))
 	if len(s.Devices) > 0 {
 		fmt.Fprintln(w)
@@ -370,7 +391,7 @@ func syncStatusJSON(s devsync.Status) map[string]any {
 		devices = append(devices, map[string]any{"uid": d.UID, "label": d.Label, "name": d.Name, "self": d.Self,
 			"last_published": ts(d.LastPublished)})
 	}
-	return map[string]any{"enabled": true, "folder": s.Folder, "label": s.Label, "locked": s.Locked,
+	return map[string]any{"enabled": true, "folder": s.Folder, "label": s.Label, "receive_only": s.ReceiveOnly, "locked": s.Locked,
 		"pending": s.Pending, "last_merged": ts(s.LastPull), "last_published": ts(s.LastPush),
 		"problem": s.Problem, "devices": devices}
 }
@@ -419,6 +440,83 @@ shown with that letter everywhere (#12b becomes #12c).`,
 			return nil
 		},
 	}
+}
+
+const (
+	receiveOnlyFlag = "merge other computers' changes but never publish this one's"
+	receiveOnlyNote = "This computer is receive-only: it merges other computers' changes and publishes none of its own."
+)
+
+func newSyncModeCmd(e *env) *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "mode [two-way|receive-only]",
+		Short: "Show or change whether this computer publishes its changes",
+		Long: `Show whether this computer syncs two ways or is receive-only, or change it.
+
+A receive-only computer merges the other computers' changes but never
+publishes its own, for example a work laptop whose notes must stay on it
+while notes from a personal laptop still arrive. Its edits to entries from
+other computers stay on it too, and a later edit to the same field elsewhere
+replaces them.
+
+Switching to receive-only removes this computer's files from the sync folder.
+Computers that already merged them keep what they have.
+
+Switching to two-way publishes everything in this archive, so it asks first.`,
+		Example:   "  holocron sync mode\n  holocron sync mode receive-only\n  holocron sync mode two-way",
+		Args:      cobra.MaximumNArgs(1),
+		ValidArgs: []string{"two-way", "receive-only"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			a, err := e.openNoSync(ctx)
+			if err != nil {
+				return err
+			}
+			cfg, err := a.Sync.Configured(ctx)
+			if errors.Is(err, devsync.ErrNotConfigured) {
+				return usagef("sync is not set up; see `holocron sync --help`")
+			}
+			if err != nil {
+				return err
+			}
+			current := map[bool]string{true: "receive-only", false: "two-way"}[cfg.ReceiveOnly]
+			if len(args) == 0 {
+				fmt.Fprintln(e.io.Out, current)
+				return nil
+			}
+			var receiveOnly bool
+			switch args[0] {
+			case "receive-only":
+				receiveOnly = true
+			case "two-way":
+			default:
+				return usagef("unknown mode %q; use two-way or receive-only", args[0])
+			}
+			if args[0] == current {
+				fmt.Fprintf(e.io.Out, "This computer is already %s.\n", current)
+				return nil
+			}
+			if !receiveOnly && !yes && !confirm(e, "Publish every entry and project on this computer to the sync folder?") {
+				if !e.io.InTTY {
+					return usagef("pass --yes to publish this computer's entries")
+				}
+				e.note("Nothing changed.")
+				return nil
+			}
+			if err := a.Sync.SetReceiveOnly(ctx, receiveOnly); err != nil {
+				return err
+			}
+			if receiveOnly {
+				fmt.Fprintf(e.io.Out, "%s %s\n", e.out().Success("Done."), receiveOnlyNote)
+			} else {
+				fmt.Fprintf(e.io.Out, "%s This computer syncs two ways and has published its entries.\n", e.out().Success("Done."))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask before publishing (two-way)")
+	return cmd
 }
 
 func newSyncOffCmd(e *env) *cobra.Command {
