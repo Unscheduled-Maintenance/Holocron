@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +75,8 @@ type EntryJSON struct {
 	Tags       []string        `json:"tags"`
 	Marks      []string        `json:"marks"`
 	ResolvedAt *time.Time      `json:"resolved_at"`
+	ResolvedBy *int64          `json:"resolved_by"`
+	Resolves   []int64         `json:"resolves"`
 	CreatedAt  time.Time       `json:"created_at"`
 	UpdatedAt  time.Time       `json:"updated_at"`
 	Source     *journal.Source `json:"source"`
@@ -113,9 +116,9 @@ func JSON(w io.Writer, a Archive) error {
 	return enc.Encode(doc)
 }
 
-func nonNil(s []string) []string {
+func nonNil[T any](s []T) []T {
 	if s == nil {
-		return []string{}
+		return []T{}
 	}
 	return s
 }
@@ -191,7 +194,11 @@ func metaLine(e journal.Entry) string {
 		t := string(e.Type)
 		if e.Type.Opens() {
 			if e.ResolvedAt != nil {
-				t += " (resolved)"
+				t += " (resolved"
+				if e.ResolvedBy != 0 {
+					t += " by #" + strconv.FormatInt(e.ResolvedBy, 10)
+				}
+				t += ")"
 			} else {
 				t += " (open)"
 			}
@@ -211,6 +218,13 @@ func metaLine(e journal.Entry) string {
 			ms[i] = string(m)
 		}
 		parts = append(parts, "marks: "+strings.Join(ms, ", "))
+	}
+	if len(e.Resolves) > 0 {
+		refs := make([]string, len(e.Resolves))
+		for i, id := range e.Resolves {
+			refs[i] = "#" + strconv.FormatInt(id, 10)
+		}
+		parts = append(parts, "resolves: "+strings.Join(refs, ", "))
 	}
 	if e.Source != nil {
 		src := "source: " + e.Source.Type + " " + e.Source.ID
@@ -269,7 +283,7 @@ func NewEntryJSON(e journal.Entry) EntryJSON {
 		ID: e.ID, UID: e.UID, OccurredAt: e.OccurredAt.UTC(),
 		LocalTime: e.OccurredAt.In(e.RecordedOffset()).Format(time.RFC3339),
 		Body:      e.Body, Type: strPtr(string(e.Type)), Project: strPtr(e.Project),
-		Tags: nonNil(e.Tags), Marks: []string{},
+		Tags: nonNil(e.Tags), Marks: []string{}, Resolves: nonNil(e.Resolves),
 		CreatedAt: e.CreatedAt.UTC(), UpdatedAt: e.UpdatedAt.UTC(), Source: e.Source,
 	}
 	for _, m := range e.Marks {
@@ -278,6 +292,10 @@ func NewEntryJSON(e journal.Entry) EntryJSON {
 	if e.ResolvedAt != nil {
 		t := e.ResolvedAt.UTC()
 		je.ResolvedAt = &t
+	}
+	if e.ResolvedBy != 0 {
+		by := e.ResolvedBy
+		je.ResolvedBy = &by
 	}
 	return je
 }

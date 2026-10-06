@@ -15,15 +15,16 @@ import (
 )
 
 type addFlags struct {
-	project string
-	typ     string
-	tags    []string
-	marks   []string
-	at      string
-	raw     bool
-	editor  bool
-	json    bool
-	quiet   bool
+	project  string
+	typ      string
+	tags     []string
+	marks    []string
+	at       string
+	raw      bool
+	editor   bool
+	json     bool
+	quiet    bool
+	resolves []string
 }
 
 func (f *addFlags) register(cmd *cobra.Command) {
@@ -33,6 +34,7 @@ func (f *addFlags) register(cmd *cobra.Command) {
 	fs.StringSliceVarP(&f.tags, "tag", "t", nil, "tag (repeatable or comma-separated)")
 	fs.StringSliceVar(&f.marks, "mark", nil, "report mark: staff, one-on-one, quarterly, important, cross-team")
 	fs.StringVar(&f.at, "at", "", "when it happened: 14:30, yesterday 16:00, 2026-10-02 09:15, -2h (default: now)")
+	fs.StringSliceVar(&f.resolves, "resolves", nil, "resolve these open problems or follow-ups, linking them to this entry (repeatable)")
 	fs.BoolVar(&f.raw, "raw", false, "store the text exactly; do not read +project or #tag shorthand")
 	fs.BoolVarP(&f.editor, "editor", "e", false, "write the entry in $VISUAL/$EDITOR")
 	fs.BoolVar(&f.json, "json", false, "print the saved entry as JSON")
@@ -99,7 +101,7 @@ func runAdd(ctx context.Context, e *env, f *addFlags, args []string) error {
 	if f.editor {
 		return addWithEditor(ctx, e, a, f, text)
 	}
-	res, err := a.Capture(ctx, app.CaptureInput{Text: text, Project: f.project, Type: f.typ, Tags: f.tags, Marks: f.marks, At: f.at, Raw: f.raw})
+	res, err := a.Capture(ctx, app.CaptureInput{Text: text, Project: f.project, Type: f.typ, Tags: f.tags, Marks: f.marks, At: f.at, Raw: f.raw, Resolves: f.resolves})
 	if err != nil {
 		return err
 	}
@@ -118,6 +120,14 @@ func reportSaved(e *env, a *app.App, f *addFlags, res app.CaptureResult, verb st
 	default:
 		st := e.out()
 		fmt.Fprintf(e.io.Out, "%s %s\n", st.Success(verb), summaryLine(a, st, res.Entry))
+		for _, r := range res.Resolved {
+			fmt.Fprintf(e.io.Out, "%s %s\n", st.Success("Resolved"), summaryLine(a, st, r))
+		}
+	}
+	for _, r := range res.Resolved {
+		if !r.Type.Opens() && !f.quiet && !f.json {
+			e.note("Note: %s is a %s, not a problem or follow-up; recording it as resolved anyway.", r.Ref(), typeOrNone(r.Type))
+		}
 	}
 	return nil
 }
@@ -143,7 +153,7 @@ func addWithEditor(ctx context.Context, e *env, a *app.App, f *addFlags, initial
 	if err != nil {
 		return err
 	}
-	res, err := a.CreateFromDoc(ctx, parsed)
+	res, err := a.CreateFromDoc(ctx, parsed, f.resolves...)
 	if errors.Is(err, app.ErrEmptyEntry) {
 		e.note("Nothing saved: the entry text was empty.")
 		return nil

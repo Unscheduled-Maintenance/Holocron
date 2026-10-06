@@ -111,6 +111,7 @@ are optional.
 | `--type TYPE` | One of `work`, `accomplishment`, `decision`, `investigation`, `problem`, `follow-up`, `note`. Unique prefixes and [aliases](#type-aliases) work: `--type dec`, `--type win`. |
 | `-t, --tag TAG` | Repeatable or comma-separated. Tags are lower-cased and may contain letters, digits, `-`, `_`, `.`, `/` and `:`. |
 | `--mark MARK` | Report mark: `staff`, `one-on-one`, `quarterly`, `important`, `cross-team` (see [Reports](#reports)). |
+| `--resolves ID` | Resolve an open problem or follow-up and link it to this entry (see [Editing, marking, resolving and deleting](#editing-marking-resolving-and-deleting)). Repeatable. |
 | `--at WHEN` | When it happened: `14:30`, `2:30pm`, `yesterday 16:00`, `2026-10-02 09:15`, `-2h`, `90m ago`. A date without a time means noon. Default: now. |
 | `-e, --editor` | Write the entry in your editor. |
 | `--raw` | Store the text exactly as given (no shorthand parsing). |
@@ -293,6 +294,22 @@ written in a ticket last year can never silently point to a different entry.
 
 Problems and follow-ups are *open* until resolved. Open items appear in the
 staff and one-on-one reports and in `holocron list --open`.
+
+When the resolution is itself worth recording, capture it with `--resolves`
+instead of `holocron resolve`:
+
+```bash
+holocron add "Engineering approved the ARM capacity" --resolves 42
+```
+
+This saves the new entry, resolves #42 at the new entry's time and links the
+two: `holocron show 42` says "resolved … by #57", and `holocron show 57`
+lists what it resolves. In reports the new entry reads "Engineering approved
+the ARM capacity (resolves #42: ask about ARM capacity)" and cites both
+entries, and it counts as completed work in the staff update and as a win in
+the one-on-one whatever its type. `--resolves` is repeatable, works with
+`holocron now` and `add --editor`, and refuses an item that is already
+resolved (nothing is saved). `holocron resolve 42 --reopen` removes the link.
 
 ## Projects and tags
 

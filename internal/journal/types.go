@@ -238,9 +238,13 @@ type Entry struct {
 	Tags       []string
 	Marks      []Mark
 	ResolvedAt *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Source     *Source
+	// ResolvedBy is the entry that resolved this one, or 0.
+	ResolvedBy int64
+	// Resolves lists the entries this one resolved, in ID order.
+	Resolves  []int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Source    *Source
 
 	// Snippet is set by text searches: a fragment of the body with matches
 	// wrapped in HighlightStart/HighlightEnd.

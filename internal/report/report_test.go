@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -358,5 +360,60 @@ func TestEachEntryAppearsOnce(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestResolutionsInReports(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	old := f.ids["oldproblem"]
+	fix, err := f.store.AddEntry(ctx, journal.NewEntry{Body: "Moved backups to the new storage tier", Type: journal.TypeAccomplishment,
+		OccurredAt: time.Date(2026, 10, 7, 16, 0, 0, 0, time.UTC), Resolves: []int64{old}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []Kind{Staff, OneOnOne, Week} {
+		rep := f.build(t, k, "this-week")
+		var found *Item
+		for _, s := range rep.Sections {
+			for i := range s.Items {
+				if s.Items[i].EntryIDs[0] == fix.ID {
+					found = &s.Items[i]
+				}
+				if s.Items[i].Open && has(s.Items[i].EntryIDs, old) {
+					t.Errorf("%s: resolved problem still listed as open", k)
+				}
+			}
+		}
+		if found == nil {
+			t.Fatalf("%s: resolving entry not in report", k)
+		}
+		want := fmt.Sprintf("Moved backups to the new storage tier (resolves #%d: Backups occasionally time out)", old)
+		if found.Text != want || !reflect.DeepEqual(found.EntryIDs, []int64{fix.ID, old}) {
+			t.Errorf("%s: item = %q %v", k, found.Text, found.EntryIDs)
+		}
+		if _, ok := rep.Entries[old]; !ok {
+			t.Errorf("%s: resolved entry (outside the range) is not among the report's sources", k)
+		}
+		if !slices.Contains(found.Reasons, fmt.Sprintf("resolves #%d", old)) {
+			t.Errorf("%s: reasons = %v", k, found.Reasons)
+		}
+	}
+
+	// An untyped entry that closes an open item is completed work, not
+	// routine work left out of the staff update.
+	chased, err := f.store.AddEntry(ctx, journal.NewEntry{Body: "Engineering approved the ARM capacity",
+		OccurredAt: time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC), Resolves: []int64{f.ids["arm"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := sectionIDs(f.build(t, Staff, "this-week"), "completed"); !has(ids, chased.ID) || !has(ids, f.ids["arm"]) {
+		t.Errorf("staff completed = %v, want #%d citing #%d", ids, chased.ID, f.ids["arm"])
+	}
+	if ids := sectionIDs(f.build(t, Staff, "this-week"), "upcoming"); has(ids, f.ids["arm"]) {
+		t.Error("a resolved follow-up is still coming up")
+	}
+	if ids := sectionIDs(f.build(t, OneOnOne, "this-week"), "wins"); !has(ids, chased.ID) {
+		t.Errorf("one-on-one wins = %v, want #%d", ids, chased.ID)
 	}
 }

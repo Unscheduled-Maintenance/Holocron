@@ -277,7 +277,11 @@ func newResolveCmd(e *env) *cobra.Command {
 		Short: "Mark problems or follow-ups as resolved (or --reopen them)",
 		Long: `Problems and follow-ups stay open until resolved. Open items appear in the
 staff and one-on-one reports and with --open; resolving them takes them off
-those lists without deleting anything.`,
+those lists without deleting anything.
+
+To record what resolved an item, capture it as a new entry instead:
+  holocron add "Engineering approved the ARM capacity" --resolves 42
+which resolves #42 and links the two.`,
 		Example:           "  holocron resolve 42\n  holocron resolve 42 --reopen\n  holocron list --open",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: entryCompletion(e),

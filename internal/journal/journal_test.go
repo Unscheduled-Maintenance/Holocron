@@ -728,3 +728,77 @@ func TestProjectForPathCanonicalises(t *testing.T) {
 		}
 	}
 }
+
+func TestResolvesLink(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	fu := add(t, s, NewEntry{Body: "ask about ARM capacity", Type: TypeFollowUp, OccurredAt: base})
+	pr := add(t, s, NewEntry{Body: "exporter restarts", Type: TypeProblem, OccurredAt: base})
+	at := base.Add(48 * time.Hour)
+	done := add(t, s, NewEntry{Body: "ARM capacity approved", OccurredAt: at, Resolves: []int64{fu.ID, pr.ID}})
+	if !reflect.DeepEqual(done.Resolves, []int64{fu.ID, pr.ID}) {
+		t.Fatalf("Resolves = %v", done.Resolves)
+	}
+	for _, id := range []int64{fu.ID, pr.ID} {
+		got, err := s.GetByID(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ResolvedAt == nil || !got.ResolvedAt.Equal(at) || got.ResolvedBy != done.ID || got.IsOpen() {
+			t.Fatalf("#%d resolved = %v by %d", id, got.ResolvedAt, got.ResolvedBy)
+		}
+	}
+	if open, err := s.Find(ctx, Query{OpenOnly: true}); err != nil || len(open) != 0 {
+		t.Fatalf("open items = %v, %v", ids(open), err)
+	}
+
+	// Resolving an already-resolved or unknown entry saves nothing.
+	before, _ := s.Find(ctx, Query{})
+	if _, err := s.AddEntry(ctx, NewEntry{Body: "again", Resolves: []int64{fu.ID}}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("resolving twice: %v", err)
+	}
+	if _, err := s.AddEntry(ctx, NewEntry{Body: "nothing", Resolves: []int64{999}}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown entry: %v", err)
+	}
+	if after, _ := s.Find(ctx, Query{}); len(after) != len(before) {
+		t.Fatalf("a failed resolve saved an entry: %d → %d", len(before), len(after))
+	}
+
+	// Reopening drops the link; resolving by hand leaves it unset.
+	reopen, resolve := false, true
+	got, err := s.Update(ctx, pr.ID, Patch{Resolved: &reopen})
+	if err != nil || got.ResolvedAt != nil || got.ResolvedBy != 0 {
+		t.Fatalf("reopen = %v by %d, %v", got.ResolvedAt, got.ResolvedBy, err)
+	}
+	if got, _ = s.GetByID(ctx, done.ID); !reflect.DeepEqual(got.Resolves, []int64{fu.ID}) {
+		t.Fatalf("after reopen Resolves = %v", got.Resolves)
+	}
+	if got, _ = s.Update(ctx, pr.ID, Patch{Resolved: &resolve}); got.ResolvedAt == nil || got.ResolvedBy != 0 {
+		t.Fatalf("manual resolve = %v by %d", got.ResolvedAt, got.ResolvedBy)
+	}
+
+	// Deleting the resolver keeps the resolution but drops the link; undo
+	// restores the link.
+	done, _ = s.GetByID(ctx, done.ID)
+	if err := s.Delete(ctx, done.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetByID(ctx, fu.ID); got.ResolvedAt == nil || got.ResolvedBy != 0 {
+		t.Fatalf("after deleting the resolver: %v by %d", got.ResolvedAt, got.ResolvedBy)
+	}
+	if _, err := s.Restore(ctx, done); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetByID(ctx, fu.ID); got.ResolvedBy != done.ID {
+		t.Fatalf("restore did not relink: by %d", got.ResolvedBy)
+	}
+
+	// Undo of a deleted resolved entry keeps its link to the resolver.
+	fu, _ = s.GetByID(ctx, fu.ID)
+	if err := s.Delete(ctx, fu.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.Restore(ctx, fu); got.ResolvedBy != done.ID || got.ResolvedAt == nil {
+		t.Fatalf("restored resolved entry: %v by %d", got.ResolvedAt, got.ResolvedBy)
+	}
+}

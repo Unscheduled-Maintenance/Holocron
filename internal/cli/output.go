@@ -253,10 +253,13 @@ func renderDetail(w io.Writer, a *app.App, st style.Styler, e journal.Entry, md 
 	}
 	if e.Type.Opens() {
 		if e.ResolvedAt != nil {
-			row("Status", "resolved "+e.ResolvedAt.In(a.Loc).Format("Mon 2 Jan 2006 "+a.TimeLayout()))
+			row("Status", "resolved "+e.ResolvedAt.In(a.Loc).Format("Mon 2 Jan 2006 "+a.TimeLayout())+resolvedBy(e))
 		} else {
 			row("Status", st.Warn("open"))
 		}
+	}
+	if len(e.Resolves) > 0 {
+		row("Resolves", refList(e.Resolves))
 	}
 	if e.Source != nil {
 		src := e.Source.Type + " " + e.Source.ID
@@ -320,4 +323,21 @@ func (e *env) markdownRenderer() func(string) string {
 		dark = lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 	}
 	return func(s string) string { return markdown.Render(s, width-2, dark) }
+}
+
+// resolvedBy describes the entry that resolved e, if one is linked.
+func resolvedBy(e journal.Entry) string {
+	if e.ResolvedBy == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" by #%d", e.ResolvedBy)
+}
+
+// refList formats entry IDs as "#42, #43".
+func refList(ids []int64) string {
+	refs := make([]string, len(ids))
+	for i, id := range ids {
+		refs[i] = fmt.Sprintf("#%d", id)
+	}
+	return strings.Join(refs, ", ")
 }
