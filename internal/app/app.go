@@ -143,6 +143,11 @@ func (a *App) Capture(ctx context.Context, in CaptureInput) (CaptureResult, erro
 		if err != nil {
 			return CaptureResult{}, err
 		}
+		if sh.TypePrefix != "" && t != sh.Type {
+			// An explicit, different --type wins, so the leading "Note:" was
+			// not shorthand after all: keep the text exactly as typed.
+			text = sh.TypePrefix + text
+		}
 		typ = t
 	}
 	marks, err := journal.ParseMarks(in.Marks)

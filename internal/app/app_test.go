@@ -60,6 +60,23 @@ func TestCaptureRules(t *testing.T) {
 	if res.Entry.Type != journal.TypeWork {
 		t.Fatal("explicit --type must beat inferred type")
 	}
+	if res.Entry.Body != "Decision: keep it" {
+		t.Fatalf("a conflicting --type must keep the text as typed, got %q", res.Entry.Body)
+	}
+
+	// The type prefix sets the type and is removed from the stored text (#1).
+	res, _ = a.Capture(ctx, CaptureInput{Text: "Decision: keep weekly deploy windows +infra"})
+	if res.Entry.Type != journal.TypeDecision || res.Entry.Body != "keep weekly deploy windows" || res.Entry.Project != "infra" {
+		t.Fatalf("type prefix capture = %q %q %q", res.Entry.Type, res.Entry.Body, res.Entry.Project)
+	}
+	res, _ = a.Capture(ctx, CaptureInput{Text: "decision: agreed with --type", Type: "dec"})
+	if res.Entry.Type != journal.TypeDecision || res.Entry.Body != "agreed with --type" {
+		t.Fatalf("matching --type should still strip the prefix: %q %q", res.Entry.Type, res.Entry.Body)
+	}
+	res, _ = a.Capture(ctx, CaptureInput{Text: "Decision: kept as typed", Raw: true})
+	if res.Entry.Type != journal.TypeNone || res.Entry.Body != "Decision: kept as typed" {
+		t.Fatalf("--raw must keep the prefix: %q %q", res.Entry.Type, res.Entry.Body)
+	}
 
 	strict := openApp(t, "[capture]\ncreate_projects = false\nshorthand = false\n")
 	if _, err := strict.Capture(ctx, CaptureInput{Text: "x", Project: "nope"}); !errors.Is(err, journal.ErrNotFound) {

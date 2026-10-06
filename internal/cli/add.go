@@ -57,7 +57,8 @@ Shorthand inside the text sets metadata quickly:
   #tag       add a tag (quote the text: shells treat a bare # as a comment)
 Tokens at the start or end are removed from the text; in mid-sentence the
 word stays without its sigil. "#123", "C#" and "+1" are left alone.
-Text starting with a type and a colon ("Decision: ...") gets that type.
+Text starting with a type and a colon ("Decision: keep it") gets that type,
+and the prefix is removed from the stored text.
 Use --raw to turn shorthand off, or the flags for an unambiguous form.`,
 		Example: `  holocron add "Enabled IAM Access Analyzer in all AWS regions"
   holocron add "Investigating unexpected exporter restarts" --project cloudflare --type investigation --tag monitoring

@@ -134,9 +134,12 @@ The rules are deliberately simple and predictable:
   middle keep their word without the sigil, so the third example is stored as
   "Patched security hole in the aws account".
 - Only one `+project` is allowed per entry.
-- Text that begins with a type and a colon, such as `Decision: ...` or
-  `Follow-up: ...`, gets that type unless `--type` says otherwise. The text is
-  not changed.
+- Text that begins with a type and a colon gets that type, and the prefix is
+  removed: `Decision: keep weekly deploy windows` is stored as the decision
+  "keep weekly deploy windows". This works for every type (`Work:`,
+  `Accomplishment:`, `Decision:`, `Investigation:`, `Problem:`, `Follow-up:`,
+  `Note:`), in any letter case. If `--type` names a different type, the
+  prefix is treated as ordinary text and kept.
 
 > **Quote text that contains `#`.** Bash, Zsh and PowerShell treat an unquoted
 > word starting with `#` as a comment and silently drop it. Inside quotes it is
