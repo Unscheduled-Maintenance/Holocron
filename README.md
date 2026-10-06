@@ -362,13 +362,37 @@ holocron report week --format json
 |---|---|---|
 | `day` | today | Chronological timeline, then anything still open. |
 | `week` | this week | One section per project, most significant work first; routine entries beyond the section limit are counted, not listed; open items last. |
-| `staff` | this week | Completed work, decisions, problems and investigations, what's coming up, and items for other teams. Routine work and notes are left out (with a count) unless marked. |
+| `staff` | this week (last week on the first day of the week; see [below](#timing-the-staff-update)) | Completed work, decisions, problems and investigations, what's coming up, and items for other teams. Routine work and notes are left out (with a count) unless marked. |
 | `one-on-one` | last 14 days | Items marked for discussion, wins, decisions, open problems and follow-ups (looking back 90 days), and *recurring friction*: tags or projects with two or more problems or investigations. |
 | `quarter` | this quarter | Per project: how many weeks it was active, accomplishments, decisions and marked items, plus a count of routine work; recurring themes from tags. |
 
 Common report options: `--range/--since/--from/--to`, `-p/--project`,
 `-f/--format text|markdown|json`, `-o/--output FILE`, `--ids`, `--explain`,
 `--max N` (items per section).
+
+### Timing the staff update
+
+The staff update is often written at the start of the week, about the week
+that just finished. So when its default range is `this-week` and you run it
+on the first day of the week, it covers *last* week instead and says so at
+the top. `reports.staff_early_days` sets how many days count as early (`1` by
+default, `0` turns it off), and any `--range`, `--since`, `--from` or `--to`
+wins.
+
+To cover exactly what is new since the last update you sent, record the
+report when you send it, and start the next one from there:
+
+```bash
+holocron report staff --record             # remember this update as sent
+holocron report staff --since last         # everything since then
+```
+
+`--since last` starts where the last recorded report of the same kind ended,
+or when it was recorded if that is earlier (a this-week update sent on
+Wednesday covers nothing after Wednesday). It works for every report kind,
+each remembering its own, and can be combined with `--to`. Generating a
+report never records it unless you pass `--record`, and an `--ai` report is
+recorded only once it is actually delivered.
 
 ### Report marks
 
@@ -608,6 +632,7 @@ look = "investigation"       # built in; set to "" to remove
 [reports]
 max_items = 8
 staff_range = "this-week"
+staff_early_days = 1         # on the first day of the week, staff covers last week (0 = off)
 one_on_one_range = "14d"
 open_lookback = "90d"        # how far back open problems and follow-ups are collected
 

@@ -30,7 +30,7 @@ func TestLoadDefaultsWithoutFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load without file: %v", err)
 	}
-	if cfg.Reports.MaxItems != 8 || !cfg.ShorthandEnabled() || !cfg.CreateProjectsEnabled() {
+	if cfg.Reports.MaxItems != 8 || cfg.Reports.StaffEarlyDays != 1 || !cfg.ShorthandEnabled() || !cfg.CreateProjectsEnabled() {
 		t.Fatalf("defaults not applied: %+v", cfg)
 	}
 	if want := filepath.Join(dir, "data", "holocron.db"); p.Database != want {
@@ -86,15 +86,17 @@ author_emails = ["me@example.com"]
 func TestLoadRejectsBadConfig(t *testing.T) {
 	dir := isolate(t)
 	cases := map[string]string{
-		"unknown key":  "colour = \"red\"\n",
-		"bad weekday":  "week_start = \"caturday\"\n",
-		"bad clock":    "clock = \"36h\"\n",
-		"bad range":    "[tui]\ndefault_range = \"fortnight\"\n",
-		"bad provider": "[ai]\nprovider = \"skynet\"\n",
-		"syntax error": "week_start = \n",
-		"wrong type":   "[reports]\nmax_items = \"lots\"\n",
-		"alias target": "[type_aliases]\nwin = \"victory\"\n",
-		"alias name":   "[type_aliases]\ndecision = \"note\"\n",
+		"unknown key":    "colour = \"red\"\n",
+		"bad weekday":    "week_start = \"caturday\"\n",
+		"bad clock":      "clock = \"36h\"\n",
+		"bad range":      "[tui]\ndefault_range = \"fortnight\"\n",
+		"bad provider":   "[ai]\nprovider = \"skynet\"\n",
+		"syntax error":   "week_start = \n",
+		"wrong type":     "[reports]\nmax_items = \"lots\"\n",
+		"alias target":   "[type_aliases]\nwin = \"victory\"\n",
+		"alias name":     "[type_aliases]\ndecision = \"note\"\n",
+		"early days":     "[reports]\nstaff_early_days = 7\n",
+		"early negative": "[reports]\nstaff_early_days = -1\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {

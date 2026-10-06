@@ -20,47 +20,49 @@ var newAIProvider = func(cfg config.AIConfig) (ai.Provider, error) { return ai.N
 // runAIReport sends the entries a deterministic report selected (and only
 // those) to the configured provider, then shows the result with a source
 // list. Failures fall back to the deterministic report.
-func runAIReport(ctx context.Context, e *env, a *app.App, rep report.Report, f *reportFlags) error {
+// runAIReport rewrites the report with the AI provider. It reports whether a
+// report was delivered, so --record is skipped when the person cancels.
+func runAIReport(ctx context.Context, e *env, a *app.App, rep report.Report, f *reportFlags) (bool, error) {
 	if strings.ToLower(f.format) == "json" {
-		return usagef("--ai produces Markdown; use --format text or markdown")
+		return false, usagef("--ai produces Markdown; use --format text or markdown")
 	}
 	if rep.IsEmpty() {
 		e.note("The report has no entries to rewrite; nothing was sent.")
-		return renderDeterministic(e, a, rep, f)
+		return true, renderDeterministic(e, a, rep, f)
 	}
 	provider, err := newAIProvider(a.Config.AI)
 	if err != nil {
-		return err
+		return false, err
 	}
 	ids := rep.SourceIDs()
 	disclosure := fmt.Sprintf("This sends the full text of %d selected %s (%s) to %s.",
 		len(ids), plural(len(ids), "entry", "entries"), idList(ids), provider.Name())
 	if !f.yes {
 		if !e.io.InTTY {
-			return usagef("%s Pass --yes to confirm non-interactively.", disclosure)
+			return false, usagef("%s Pass --yes to confirm non-interactively.", disclosure)
 		}
 		if !confirm(e, disclosure+" Continue?") {
 			e.note("Nothing was sent.")
-			return nil
+			return false, nil
 		}
 	}
 	resp, err := provider.Generate(ctx, ai.BuildRequest(rep))
 	if err != nil {
 		e.note("%s AI report failed: %v. Showing the deterministic report instead.", e.errStyle().Warn("warning:"), err)
 		if rerr := renderDeterministic(e, a, rep, f); rerr != nil {
-			return rerr
+			return false, rerr
 		}
-		return fmt.Errorf("AI report failed: %w", err)
+		return false, fmt.Errorf("AI report failed: %w", err)
 	}
 	doc := resp.Text + "\n" + ai.Provenance(resp.Text, rep, provider.Name())
 	if f.output != "" && !f.yes && e.io.InTTY {
 		fmt.Fprintln(e.io.Out, doc)
 		if !confirm(e, "Write this report to "+expandPath(f.output)+"?") {
 			e.note("Not written.")
-			return nil
+			return false, nil
 		}
 	}
-	return writeOutput(e, f.output, []byte(doc), "AI report")
+	return true, writeOutput(e, f.output, []byte(doc), "AI report")
 }
 
 func renderDeterministic(e *env, a *app.App, rep report.Report, f *reportFlags) error {

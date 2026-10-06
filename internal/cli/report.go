@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/Unscheduled-Maintenance/Holocron/internal/app"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/config"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/export"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/journal"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/report"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/style"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/timerange"
@@ -29,6 +31,7 @@ type reportFlags struct {
 	max     int
 	ai      bool
 	yes     bool
+	record  bool
 }
 
 func newReportCmd(e *env) *cobra.Command {
@@ -50,6 +53,8 @@ Every item can be traced to its source entries: --ids shows their numbers and
 holocron mark <id> staff|one-on-one|quarterly|important|cross-team.`,
 		Example: `  holocron report week
   holocron report staff --range last-week
+  holocron report staff --record
+  holocron report staff --since last
   holocron report one-on-one --explain
   holocron report quarter --range 2026-Q3 --format markdown -o q3.md
   holocron report day --date yesterday`,
@@ -95,6 +100,7 @@ func newReportKindCmd(e *env, kind report.Kind) *cobra.Command {
 	fs.IntVar(&f.max, "max", 0, "items per section (default from config, 8)")
 	fs.BoolVar(&f.ai, "ai", false, "rewrite the report with the configured AI provider (sends the selected entries to it)")
 	fs.BoolVarP(&f.yes, "yes", "y", false, "with --ai and --output, write without asking for review")
+	fs.BoolVar(&f.record, "record", false, "remember this report as sent, so the next one can start after it with --since last")
 	_ = cmd.RegisterFlagCompletionFunc("format", fixedCompletion("text", "markdown", "json"))
 	registerDynamicCompletion(cmd, e)
 	return cmd
@@ -111,9 +117,20 @@ func runReport(ctx context.Context, e *env, kind report.Kind, f *reportFlags) er
 		}
 		f.rangeExpr = f.date
 	}
-	rng, err := f.resolveRange(a, a.DefaultReportRange(kind))
-	if err != nil {
-		return err
+	def, note := a.DefaultReportRange(kind)
+	var rng timerange.Range
+	if strings.EqualFold(strings.TrimSpace(f.since), "last") {
+		if rng, err = sinceLastReport(ctx, a, kind, f); err != nil {
+			return err
+		}
+		note = ""
+	} else {
+		if rng, err = f.resolveRange(a, def); err != nil {
+			return err
+		}
+		if f.rangeExpr != "" || f.since != "" || f.from != "" || f.to != "" {
+			note = ""
+		}
 	}
 	format := strings.ToLower(f.format)
 	switch format {
@@ -121,12 +138,15 @@ func runReport(ctx context.Context, e *env, kind report.Kind, f *reportFlags) er
 	default:
 		return usagef("--format must be text, markdown or json")
 	}
-	rep, err := a.ReportBuilder().Build(ctx, kind, report.Options{Range: rng, Projects: f.projects, MaxItems: f.max})
+	rep, err := a.ReportBuilder().Build(ctx, kind, report.Options{Range: rng, Projects: f.projects, MaxItems: f.max, Note: note})
 	if err != nil {
 		return err
 	}
 	if f.ai {
-		return runAIReport(ctx, e, a, rep, f)
+		if sent, err := runAIReport(ctx, e, a, rep, f); err != nil || !sent {
+			return err
+		}
+		return recordReport(ctx, e, a, kind, rng, f)
 	}
 
 	toFile := f.output != ""
@@ -144,7 +164,10 @@ func runReport(ctx context.Context, e *env, kind report.Kind, f *reportFlags) er
 	if err != nil {
 		return err
 	}
-	return writeOutput(e, f.output, buf.Bytes(), "report")
+	if err := writeOutput(e, f.output, buf.Bytes(), "report"); err != nil {
+		return err
+	}
+	return recordReport(ctx, e, a, kind, rng, f)
 }
 
 // writeOutput writes to a file (refusing to clobber silently) or stdout.
@@ -337,3 +360,45 @@ asked to confirm; without a terminal, --force is required.`,
 }
 
 func emptyRange() timerange.Range { return timerange.All() }
+
+// sinceLastReport is the range for --since last: from where the last
+// recorded report of this kind ended until now, or until --to.
+func sinceLastReport(ctx context.Context, a *app.App, kind report.Kind, f *reportFlags) (timerange.Range, error) {
+	if f.rangeExpr != "" || f.from != "" {
+		return timerange.Range{}, usagef("--since last cannot be combined with --range or --from")
+	}
+	last, err := a.Store.LastReport(ctx, string(kind))
+	if errors.Is(err, journal.ErrNotFound) {
+		return timerange.Range{}, usagef("no %s report has been recorded yet; record one with `holocron report %s --record`", kind, kind)
+	}
+	if err != nil {
+		return timerange.Range{}, err
+	}
+	start := last.Until()
+	rng := timerange.Range{Start: start}
+	if f.to != "" {
+		if rng, err = a.Clock().Bounds("", "", "", f.to, rng); err != nil {
+			return timerange.Range{}, usageError{err}
+		}
+		rng.Start = start
+		if !rng.Start.Before(rng.End) {
+			return timerange.Range{}, usagef("--to is before the last recorded %s report", kind)
+		}
+	}
+	rng.Label = "since the last " + string(kind) + " report (" + start.In(a.Loc).Format("Mon 2 Jan "+a.TimeLayout()) + ")"
+	return rng, nil
+}
+
+// recordReport remembers the report as sent when --record was given.
+func recordReport(ctx context.Context, e *env, a *app.App, kind report.Kind, rng timerange.Range, f *reportFlags) error {
+	if !f.record {
+		return nil
+	}
+	rec, err := a.Store.RecordReport(ctx, string(kind), rng)
+	if err != nil {
+		return err
+	}
+	e.note("Recorded this %s report; `holocron report %s --since last` will start from %s.",
+		kind, kind, rec.Until().In(a.Loc).Format("Mon 2 Jan "+a.TimeLayout()))
+	return nil
+}

@@ -222,15 +222,17 @@ func (a *App) Capture(ctx context.Context, in CaptureInput) (CaptureResult, erro
 // ReportBuilder returns a configured report builder.
 func (a *App) ReportBuilder() report.Builder {
 	return report.Builder{
-		Store:        a.Store,
-		Clock:        a.Clock(),
-		MaxItems:     a.Config.Reports.MaxItems,
-		OpenLookback: a.Config.Reports.OpenLookback,
+		Store:          a.Store,
+		Clock:          a.Clock(),
+		MaxItems:       a.Config.Reports.MaxItems,
+		OpenLookback:   a.Config.Reports.OpenLookback,
+		StaffEarlyDays: a.Config.Reports.StaffEarlyDays,
 	}
 }
 
-// DefaultReportRange returns the configured default range for a report.
-func (a *App) DefaultReportRange(k report.Kind) timerange.Range {
+// DefaultReportRange returns the configured default range for a report, and a
+// note for the report when the choice needs explaining.
+func (a *App) DefaultReportRange(k report.Kind) (timerange.Range, string) {
 	return a.ReportBuilder().DefaultRange(k, a.Config.Reports.StaffRange, a.Config.Reports.OneOnOneRange)
 }
 

@@ -584,3 +584,37 @@ func TestShowTypeAliases(t *testing.T) {
 	mustContain(t, r.out+r.err, "victory")
 	mustNotContain(t, r.out, "look → investigation")
 }
+
+func TestReportSinceLast(t *testing.T) {
+	h := newHarness(t)
+	h.ok("add", "Shipped the January release", "--type", "accomplishment", "--at", "2026-01-15 10:00")
+	h.ok("add", "Shipped the February release", "--type", "accomplishment", "--at", "2026-02-03 10:00")
+
+	r := h.run("report", "staff", "--since", "last")
+	if r.code != ExitUsage || !strings.Contains(r.err, "no staff report has been recorded yet") {
+		t.Fatalf("--since last with nothing recorded: %+v", r)
+	}
+
+	r = h.run("report", "staff", "--from", "2026-01-01", "--to", "2026-01-31", "--record")
+	if r.code != 0 {
+		t.Fatalf("--record: %+v", r)
+	}
+	mustContain(t, r.out, "January release")
+	mustContain(t, r.err, "Recorded this staff report", "Sun 1 Feb")
+
+	out := h.ok("report", "staff", "--since", "last")
+	mustContain(t, out, "February release", "since the last staff report")
+	mustNotContain(t, out, "January release", "early in the week")
+	mustNotContain(t, h.ok("report", "staff", "--since", "last", "--to", "2026-02-02"), "February release")
+
+	if r := h.run("report", "staff", "--since", "last", "--range", "this-week"); r.code != ExitUsage {
+		t.Fatalf("--since last --range: %+v", r)
+	}
+	// Each kind keeps its own record.
+	if r := h.run("report", "one-on-one", "--since", "last"); r.code != ExitUsage {
+		t.Fatalf("one-on-one --since last: %+v", r)
+	}
+	// Without --record nothing is remembered.
+	h.ok("report", "staff", "--range", "2026-Q1")
+	mustContain(t, h.ok("report", "staff", "--since", "last"), "February release")
+}

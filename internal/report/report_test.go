@@ -417,3 +417,49 @@ func TestResolutionsInReports(t *testing.T) {
 		t.Errorf("one-on-one wins = %v, want #%d", ids, chased.ID)
 	}
 }
+
+func TestStaffDefaultRangeEarlyInWeek(t *testing.T) {
+	builder := func(now time.Time, weekStart time.Weekday, early int) Builder {
+		return Builder{Clock: timerange.NewClock(now, time.UTC, weekStart), StaffEarlyDays: early}
+	}
+	day := func(d, h int) time.Time { return time.Date(2026, 10, d, h, 0, 0, 0, time.UTC) } // 5 Oct 2026 is a Monday
+	lastWeek := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+	thisWeek := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name      string
+		b         Builder
+		expr      string
+		wantStart time.Time
+		wantNote  bool
+	}{
+		{"Monday morning", builder(day(5, 8), time.Monday, 1), "this-week", lastWeek, true},
+		{"Monday evening", builder(day(5, 23), time.Monday, 1), "this-week", lastWeek, true},
+		{"Tuesday", builder(day(6, 8), time.Monday, 1), "this-week", thisWeek, false},
+		{"Tuesday, two early days", builder(day(6, 8), time.Monday, 2), "This-Week", lastWeek, true},
+		{"switched off", builder(day(5, 8), time.Monday, 0), "this-week", thisWeek, false},
+		{"other ranges untouched", builder(day(5, 8), time.Monday, 1), "7d", time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC), false},
+		{"Sunday week start", builder(day(4, 8), time.Sunday, 1), "this-week", time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC), true},
+	}
+	for _, c := range cases {
+		r, note := c.b.DefaultRange(Staff, c.expr, "14d")
+		if !r.Start.Equal(c.wantStart) || (note != "") != c.wantNote {
+			t.Errorf("%s: start %v note %q; want %v note=%v", c.name, r.Start, note, c.wantStart, c.wantNote)
+		}
+	}
+	// Only the staff report changes.
+	if r, note := builder(day(5, 8), time.Monday, 1).DefaultRange(Week, "this-week", "14d"); !r.Start.Equal(thisWeek) || note != "" {
+		t.Errorf("week report moved: %v %q", r.Start, note)
+	}
+}
+
+func TestReportNote(t *testing.T) {
+	f := setup(t)
+	r, _ := f.b.Clock.Parse("last-week")
+	rep, err := f.b.Build(context.Background(), Staff, Options{Range: r, Note: "Covering last week."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Summary) == 0 || rep.Summary[0] != "Covering last week." {
+		t.Fatalf("summary = %v", rep.Summary)
+	}
+}

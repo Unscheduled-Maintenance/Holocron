@@ -815,3 +815,41 @@ func TestTypeAliasesDescribe(t *testing.T) {
 		t.Errorf("Strings = %v", got)
 	}
 }
+
+func TestReportLog(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	if _, err := s.LastReport(ctx, "staff"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("empty log: %v", err)
+	}
+	week := timerange.Range{Start: base.AddDate(0, 0, -7), End: base}
+	if _, err := s.RecordReport(ctx, "staff", week); err != nil {
+		t.Fatal(err)
+	}
+	// A this-week report recorded mid-week ends where it was recorded.
+	future := timerange.Range{Start: base, End: base.AddDate(0, 0, 7)}
+	rec, err := s.RecordReport(ctx, "staff", future)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordReport(ctx, "one-on-one", timerange.Range{Start: base.AddDate(0, 0, -14)}); err != nil {
+		t.Fatal(err)
+	}
+	last, err := s.LastReport(ctx, "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !last.Range.Start.Equal(future.Start) || !last.Range.End.Equal(future.End) || !last.RecordedAt.Equal(rec.RecordedAt) {
+		t.Fatalf("LastReport = %+v, want %+v", last, rec)
+	}
+	if !last.Until().Equal(rec.RecordedAt) {
+		t.Errorf("Until = %v, want the recording time %v", last.Until(), rec.RecordedAt)
+	}
+	oneOnOne, err := s.LastReport(ctx, "one-on-one")
+	if err != nil || !oneOnOne.Range.End.IsZero() || !oneOnOne.Until().Equal(oneOnOne.RecordedAt) {
+		t.Fatalf("open-ended record = %+v, %v", oneOnOne, err)
+	}
+	if got := (ReportRecord{Range: week, RecordedAt: base.AddDate(0, 0, 3)}).Until(); !got.Equal(week.End) {
+		t.Errorf("Until of a past range = %v, want its end %v", got, week.End)
+	}
+}
