@@ -13,6 +13,9 @@ import (
 
 	"github.com/Unscheduled-Maintenance/Holocron/internal/config"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/database"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/devsync"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/editor"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/journal"
 )
 
 // DefaultBackupPath returns a timestamped path in the backup directory.
@@ -26,18 +29,9 @@ func (a *App) DefaultBackupPath(prefix string) string {
 // Backup writes a verified, consistent copy of the archive. dest may be a
 // file path, an existing directory, or empty for the default location.
 func (a *App) Backup(ctx context.Context, dest string) (string, ArchiveInfo, error) {
-	dest = config.ExpandHome(strings.TrimSpace(dest))
-	if dest == "" {
-		dest = a.DefaultBackupPath("")
-	} else if st, err := os.Stat(dest); err == nil && st.IsDir() {
-		dest = filepath.Join(dest, filepath.Base(a.DefaultBackupPath("")))
-	}
-	abs, err := filepath.Abs(dest)
+	abs, err := a.backupDest(dest, "")
 	if err != nil {
 		return "", ArchiveInfo{}, err
-	}
-	if samePath(abs, a.Paths.Database) {
-		return "", ArchiveInfo{}, errors.New("the backup destination is the live archive itself; choose another path")
 	}
 	if err := a.DB.Backup(ctx, abs); err != nil {
 		return "", ArchiveInfo{}, err
@@ -47,6 +41,90 @@ func (a *App) Backup(ctx context.Context, dest string) (string, ArchiveInfo, err
 		return abs, info, fmt.Errorf("backup written to %s but failed verification: %w", abs, err)
 	}
 	return abs, info, nil
+}
+
+// EncryptedBackup is Backup, encrypted with age so that only the chosen
+// passphrase, SSH keys or sync key can open it. The copy is verified before
+// it is encrypted. The unencrypted copy is made in the backup directory, next
+// to the archive, and removed afterwards. Default names end in .db.age.
+func (a *App) EncryptedBackup(ctx context.Context, dest string, lock devsync.BackupLock) (string, ArchiveInfo, error) {
+	abs, err := a.backupDest(dest, ".age")
+	if err != nil {
+		return "", ArchiveInfo{}, err
+	}
+	if _, err := os.Stat(abs); err == nil {
+		return "", ArchiveInfo{}, fmt.Errorf("backup destination %s already exists", abs)
+	}
+	plain := filepath.Join(a.Paths.BackupDir, fmt.Sprintf(".holocron-encrypting-%d.tmp", time.Now().UnixNano()))
+	if err := a.DB.Backup(ctx, plain); err != nil {
+		return "", ArchiveInfo{}, err
+	}
+	defer os.Remove(plain)
+	info, err := InspectArchive(ctx, plain)
+	if err != nil {
+		return "", info, fmt.Errorf("the backup failed verification, so nothing was written: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
+		return "", info, fmt.Errorf("creating backup directory: %w", err)
+	}
+	if err := a.Sync.EncryptBackup(ctx, plain, abs, lock); err != nil {
+		return "", info, err
+	}
+	info.Path = abs
+	if st, err := os.Stat(abs); err == nil {
+		info.Size = st.Size()
+	}
+	return abs, info, nil
+}
+
+// backupDest resolves a backup destination: a file path, an existing
+// directory, or empty for the default location. suffix is added to default
+// names.
+func (a *App) backupDest(dest, suffix string) (string, error) {
+	dest = config.ExpandHome(strings.TrimSpace(dest))
+	if dest == "" {
+		dest = a.DefaultBackupPath("") + suffix
+	} else if st, err := os.Stat(dest); err == nil && st.IsDir() {
+		dest = filepath.Join(dest, filepath.Base(a.DefaultBackupPath(""))+suffix)
+	}
+	abs, err := filepath.Abs(dest)
+	if err != nil {
+		return "", err
+	}
+	if samePath(abs, a.Paths.Database) {
+		return "", errors.New("the backup destination is the live archive itself; choose another path")
+	}
+	return abs, nil
+}
+
+// DecryptBackup decrypts an encrypted backup into the backup directory, for
+// inspecting or restoring. With an empty Unlock it tries the sync keys this
+// computer keeps, then sync.key_command. The caller removes the returned file.
+func DecryptBackup(ctx context.Context, opts Options, src string, u devsync.Unlock) (string, error) {
+	cfg, paths, err := LoadConfig(opts)
+	if err != nil {
+		return "", err
+	}
+	keychain := opts.Keychain
+	if keychain == nil {
+		keychain = devsync.SystemKeychain{}
+	}
+	s := &devsync.Syncer{Keychain: keychain, KeyCommand: editor.SplitCommand(cfg.Sync.KeyCommand)}
+	// The archive says which sync set this computer belongs to.
+	if _, err := os.Stat(paths.Database); err == nil {
+		if db, err := database.Open(ctx, paths.Database, database.Options{NoMigrate: true, MustExist: true}); err == nil {
+			defer db.Close()
+			s.Store = journal.NewStore(db)
+		}
+	}
+	if err := os.MkdirAll(paths.BackupDir, 0o700); err != nil {
+		return "", err
+	}
+	plain := filepath.Join(paths.BackupDir, fmt.Sprintf(".holocron-decrypting-%d.tmp", time.Now().UnixNano()))
+	if err := s.DecryptBackup(ctx, src, plain, u); err != nil {
+		return "", err
+	}
+	return plain, nil
 }
 
 // ArchiveInfo describes an archive file.

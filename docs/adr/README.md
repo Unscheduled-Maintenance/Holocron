@@ -12,3 +12,4 @@ Short records of decisions with long-term consequences, in the Nygard format
 | [0005](0005-report-marks.md) | Report marks are separate from tags | Accepted |
 | [0006](0006-ai-provider-boundary.md) | AI behind a provider interface, fed only selected entries | Accepted |
 | [0007](0007-multi-device-sync.md) | Multi-device sync through an encrypted folder | Accepted |
+| [0008](0008-encrypted-backups.md) | Encrypted backups, unlocked like sync | Accepted |

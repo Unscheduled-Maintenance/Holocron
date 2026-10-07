@@ -519,6 +519,8 @@ holocron backup                               # to the backups folder
 holocron backup --output ~/backups/holocron.db
 holocron backup -o /mnt/usb/                  # a directory: timestamped name
 holocron restore ~/backups/holocron-20261005-090000.db
+holocron backup -o /mnt/usb/ --passphrase     # encrypted: holocron-<time>.db.age
+holocron restore /mnt/usb/holocron-20261005-090000.db.age
 ```
 
 `backup` uses SQLite's `VACUUM INTO`, which produces a consistent, compact copy
@@ -536,6 +538,30 @@ migrated after restoring. Close any running TUI before restoring.
 
 Holocron also takes an automatic backup (`holocron-pre-migration-v<N>-<time>.db`)
 before upgrading an existing archive to a newer schema.
+
+**Encrypted backups.** A backup that leaves the computer, on a USB drive or in
+cloud storage, can be encrypted with [age](https://age-encryption.org).
+Choose who can open it:
+
+| Option | Opens with | Notes |
+|---|---|---|
+| `--passphrase` | the passphrase, asked for by `restore` | can't be combined with the others |
+| `--ssh-key ~/.ssh/id_ed25519.pub` | `restore --ssh-key ~/.ssh/id_ed25519` | repeatable |
+| `--sync-key` | nothing to type on a synced computer; elsewhere `--key` or `sync.key_command` | needs [sync](#sync-between-computers); can't be combined with SSH keys |
+
+To encrypt every backup, set `encrypt_to` in the config, and use `--no-encrypt`
+to skip it once:
+
+```toml
+[backup]
+encrypt_to = ["sync-key"]   # or ["passphrase"], or ["~/.ssh/id_ed25519.pub"]
+```
+
+The copy is integrity-checked before it is encrypted. Encrypted backups are
+standard age files, so `age -d` can open them too. Keep whatever opens a
+backup somewhere other than the backup itself: without it the backup cannot
+be recovered. Automatic backups are not encrypted; they stay next to the
+archive.
 
 **Manual recovery.** The archive is an ordinary SQLite 3 file. If Holocron
 cannot open it:
@@ -759,6 +785,9 @@ author_emails = ["me@example.com"]
 key_command = ""             # prints the sync key, e.g. "op read op://Private/Holocron/sync-key"
 auto = true                  # sync before and after every command
 
+[backup]
+encrypt_to = []              # encrypt "holocron backup": "passphrase", "sync-key" or SSH .pub files
+
 [ai]
 provider = ""                # "anthropic" to enable --ai
 model = ""
@@ -845,8 +874,10 @@ Exit codes:
 - **The archive is not encrypted.** It is a plain SQLite file created with
   owner-only permissions (0600 on macOS/Linux; on Windows it inherits your
   profile's ACLs). Protect it with full-disk encryption (BitLocker, FileVault,
-  LUKS) if your entries are sensitive, and treat backups and exports the same
-  way.
+  LUKS) if your entries are sensitive, and treat exports the same way.
+  [Encrypt backups](#backup-and-restore) that leave the computer.
+- [docs/security.md](docs/security.md) sets out the threat model: what is
+  protected, from whom, and why.
 - API keys are read only from environment variables and are never written to
   the archive, the config file or diagnostics.
 - Diagnostics and error messages do not reproduce entry text.

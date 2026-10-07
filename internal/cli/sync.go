@@ -134,6 +134,39 @@ func (f *unlockFlags) unlock(e *env, a *app.App) (devsync.Unlock, error) {
 	return devsync.Unlock{Key: k}, err
 }
 
+func (f *unlockFlags) registerForBackup(cmd *cobra.Command) {
+	fs := cmd.Flags()
+	fs.BoolVar(&f.key, "key", false, "enter the sync key an encrypted backup was made with")
+	fs.BoolVar(&f.passphrase, "passphrase", false, "enter an encrypted backup's passphrase")
+	fs.StringVar(&f.sshKey, "ssh-key", "", "open an encrypted backup with this SSH private key")
+	fs.BoolVar(&f.keyCommand, "key-command", false, "run sync.key_command from the config to get the sync key")
+	cmd.MarkFlagsMutuallyExclusive("key", "passphrase", "ssh-key", "key-command")
+}
+
+// backup chooses how to open an encrypted backup. Without a flag, a
+// passphrase is asked for if the backup has one, and otherwise the sync keys
+// this computer keeps (then sync.key_command) are tried.
+func (f *unlockFlags) backup(e *env, kind devsync.BackupKind, path string) (devsync.Unlock, error) {
+	switch {
+	case f.passphrase || (kind.Passphrase && !f.key && f.sshKey == "" && !f.keyCommand):
+		p, err := readSecret(e, "Passphrase: ")
+		return devsync.Unlock{Passphrase: p}, err
+	case f.sshKey != "":
+		return devsync.Unlock{SSHKey: expandPath(f.sshKey), SSHPassphrase: func() ([]byte, error) {
+			p, err := readSecret(e, "Passphrase for "+f.sshKey+": ")
+			return []byte(p), err
+		}}, nil
+	case f.keyCommand:
+		return devsync.Unlock{KeyCommand: true}, nil
+	case f.key:
+		k, err := readSecret(e, "Sync key: ")
+		return devsync.Unlock{Key: k}, err
+	case kind.SSH && !kind.Key:
+		return devsync.Unlock{}, usagef("%s is encrypted to an SSH key; open it with --ssh-key and the private key (for example ~/.ssh/id_ed25519)", path)
+	}
+	return devsync.Unlock{}, nil
+}
+
 // readSecret reads a line without echoing it at a terminal.
 func readSecret(e *env, prompt string) (string, error) {
 	if f, ok := e.io.In.(*os.File); ok && e.io.InTTY && term.IsTerminal(int(f.Fd())) {
@@ -658,8 +691,9 @@ must run "holocron sync unlock" with the new key once.`,
 
 func choosePassphrase(e *env) (string, error) {
 	p, err := readSecret(e, "Choose a passphrase: ")
-	if err != nil {
-		return "", err
+	if err != nil || !e.io.InTTY {
+		// Piped input is read once: there is no typing to mistake.
+		return p, err
 	}
 	again, err := readSecret(e, "Repeat it: ")
 	if err != nil {
