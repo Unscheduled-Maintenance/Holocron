@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/Unscheduled-Maintenance/Holocron/internal/style"
 )
 
@@ -21,6 +23,9 @@ type RenderOptions struct {
 	// TimeLayout formats times of day ("15:04" or "3:04pm").
 	TimeLayout string
 	Styler     style.Styler
+	// Width, when positive, wraps items to fit with a hanging indent so
+	// continuation lines sit under the item text rather than the margin.
+	Width int
 }
 
 func (o RenderOptions) loc() *time.Location {
@@ -79,27 +84,44 @@ func Text(w io.Writer, r Report, o RenderOptions) error {
 		if s.Note != "" {
 			b.WriteString("  " + st.Dim(s.Note) + "\n")
 		}
+		// Pad times to a common width so item text starts in one column
+		// ("9:33am" and "12:34pm" differ in length).
+		timeWidth := 0
+		if r.Kind == Day {
+			for _, it := range s.Items {
+				if !it.Time.IsZero() {
+					timeWidth = max(timeWidth, len(it.Time.In(o.loc()).Format(o.timeLayout())))
+				}
+			}
+		}
 		for _, it := range s.Items {
 			b.WriteString("  " + st.Accent("•") + " ")
-			if r.Kind == Day && !it.Time.IsZero() {
-				b.WriteString(st.Dim(it.Time.In(o.loc()).Format(o.timeLayout())) + "  ")
+			indent := 4
+			if timeWidth > 0 {
+				var ts string
+				if !it.Time.IsZero() {
+					ts = it.Time.In(o.loc()).Format(o.timeLayout())
+				}
+				b.WriteString(st.Dim(ts) + strings.Repeat(" ", timeWidth-len(ts)+2))
+				indent += timeWidth + 2
 			}
+			var line strings.Builder
 			if sectionShowsProject(s) && it.Project != "" {
-				b.WriteString(st.Project(it.Project) + st.Dim(":") + " ")
+				line.WriteString(st.Project(it.Project) + st.Dim(":") + " ")
 			}
-			b.WriteString(it.Text)
+			line.WriteString(it.Text)
 			if sectionShowsType(r) && it.Type != "" {
-				b.WriteString(" " + st.Type("("+string(it.Type)+")"))
+				line.WriteString(" " + st.Type("("+string(it.Type)+")"))
 			}
 			if it.Open && r.Kind != OneOnOne {
-				b.WriteString(" " + st.Warn("[open]"))
+				line.WriteString(" " + st.Warn("[open]"))
 			}
 			if o.ShowIDs {
-				b.WriteString("  " + st.Faint(r.refs(it.EntryIDs)))
+				line.WriteString("  " + st.Faint(r.refs(it.EntryIDs)))
 			}
-			b.WriteString("\n")
+			b.WriteString(o.hang(line.String(), indent) + "\n")
 			if o.Explain && len(it.Reasons) > 0 {
-				b.WriteString("      " + st.Faint("why: "+strings.Join(it.Reasons, "; ")) + "\n")
+				b.WriteString("      " + o.hang(st.Faint("why: "+strings.Join(it.Reasons, "; ")), 6) + "\n")
 			}
 		}
 		if s.Omitted > 0 && !s.omittedInNote {
@@ -112,6 +134,17 @@ func Text(w io.Writer, r Report, o RenderOptions) error {
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// hang wraps text that starts at column indent so it fits o.Width, indenting
+// continuation lines to the same column. Without a width it is unchanged.
+func (o RenderOptions) hang(text string, indent int) string {
+	// Leave the last column free: writing into it makes some terminals wrap.
+	avail := o.Width - 1 - indent
+	if o.Width <= 0 || avail < 20 {
+		return text
+	}
+	return strings.ReplaceAll(ansi.Wrap(text, avail, ""), "\n", "\n"+strings.Repeat(" ", indent))
 }
 
 func describeRange(r Report, o RenderOptions) string {

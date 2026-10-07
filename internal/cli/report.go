@@ -152,6 +152,9 @@ func runReport(ctx context.Context, e *env, kind report.Kind, f *reportFlags) er
 	toFile := f.output != ""
 	ro := report.RenderOptions{ShowIDs: f.ids, Explain: f.explain, Loc: a.Loc, TimeLayout: a.TimeLayout(),
 		Styler: style.New(!toFile && style.ColorEnabled(e.g.color, e.io.OutTTY))}
+	if !toFile {
+		ro.Width = e.io.Width
+	}
 	var buf bytes.Buffer
 	switch format {
 	case "text":
