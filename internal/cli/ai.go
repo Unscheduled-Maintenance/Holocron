@@ -69,6 +69,9 @@ func renderDeterministic(e *env, a *app.App, rep report.Report, f *reportFlags) 
 	var buf bytes.Buffer
 	ro := report.RenderOptions{ShowIDs: f.ids, Explain: f.explain, Loc: a.Loc, TimeLayout: a.TimeLayout(),
 		Styler: style.New(f.output == "" && style.ColorEnabled(e.g.color, e.io.OutTTY))}
+	if f.output == "" {
+		ro.Width = e.io.Width
+	}
 	var err error
 	if strings.HasPrefix(strings.ToLower(f.format), "m") {
 		err = report.Markdown(&buf, rep, ro)

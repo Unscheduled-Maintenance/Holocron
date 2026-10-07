@@ -418,7 +418,7 @@ func (m *Model) refreshReport() {
 	}
 	var b strings.Builder
 	_ = report.Text(&b, m.rep, report.RenderOptions{ShowIDs: m.repIDs, Explain: m.repExplain, Loc: m.app.Loc,
-		TimeLayout: m.app.TimeLayout(), Styler: style.New(true)})
+		TimeLayout: m.app.TimeLayout(), Styler: style.New(true), Width: m.repVP.Width() - 1})
 	m.repVP.SetContent(lipgloss.NewStyle().Width(max(10, m.repVP.Width()-1)).Render(b.String()))
 }
 

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/Unscheduled-Maintenance/Holocron/internal/database"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/journal"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/style"
@@ -492,5 +494,52 @@ func TestLabelledReferences(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), `"`+e.Ref()+`"`) {
 		t.Errorf("JSON lacks %s", e.Ref())
+	}
+}
+
+func TestTextWrapsUnderItemText(t *testing.T) {
+	day := func(h, m int) time.Time { return time.Date(2026, 10, 7, h, m, 0, 0, time.UTC) }
+	long := strings.Repeat("verifier disk cache ", 8) + "end"
+	r := Report{Kind: Day, Title: "Day report", Sections: []Section{{Key: "timeline", Title: "Timeline", Items: []Item{
+		{Time: day(9, 33), Text: long, Type: journal.TypeInvestigation},
+		{Time: day(12, 34), Text: "short"},
+	}}}}
+
+	var buf bytes.Buffer
+	opts := RenderOptions{Loc: time.UTC, TimeLayout: "3:04pm", Styler: style.New(false), Width: 60}
+	if err := Text(&buf, r, opts); err != nil {
+		t.Fatal(err)
+	}
+	// "  • " + "12:34pm" + two spaces: text and continuations start at column 13.
+	const textCol = 13
+	var item, cont int
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if n := ansi.StringWidth(line); n > 59 {
+			t.Errorf("line is %d columns, want at most 59: %q", n, line)
+		}
+		switch {
+		case strings.HasPrefix(line, "  • "):
+			item++
+			if !strings.HasPrefix(line[textCol+2:], "verifier") && !strings.HasPrefix(line[textCol+2:], "short") {
+				t.Errorf("item text not at column %d: %q", textCol, line)
+			}
+		case item > 0 && strings.TrimSpace(line) != "":
+			cont++
+			if strings.TrimLeft(line, " ") != line[textCol:] || line[textCol] == ' ' {
+				t.Errorf("continuation not indented to column %d: %q", textCol, line)
+			}
+		}
+	}
+	if item != 2 || cont == 0 {
+		t.Fatalf("got %d items and %d continuation lines:\n%s", item, cont, buf.String())
+	}
+
+	buf.Reset()
+	opts.Width = 0
+	if err := Text(&buf, r, opts); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), long) {
+		t.Errorf("without a width the item should stay on one line:\n%s", buf.String())
 	}
 }
