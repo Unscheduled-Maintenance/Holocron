@@ -14,6 +14,7 @@ import (
 
 	"github.com/Unscheduled-Maintenance/Holocron/internal/app"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/config"
+	"github.com/Unscheduled-Maintenance/Holocron/internal/devsync"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/export"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/journal"
 	"github.com/Unscheduled-Maintenance/Holocron/internal/report"
@@ -259,37 +260,113 @@ Entries are written oldest first.`,
 
 func newBackupCmd(e *env) *cobra.Command {
 	var output string
-	var asJSON bool
+	var asJSON, passphrase, syncKey, noEncrypt bool
+	var sshKeys []string
 	cmd := &cobra.Command{
 		Use:   "backup",
 		Short: "Write a consistent, verified copy of the archive",
 		Long: `Write a consistent copy of the archive using SQLite's VACUUM INTO, which is
 safe while Holocron is running elsewhere. The copy is integrity-checked
 before the command succeeds. By default backups go to the backups folder in
-the data directory (see holocron config path).`,
-		Example: "  holocron backup\n  holocron backup --output ~/backups/holocron.db\n  holocron backup -o /mnt/usb/",
+the data directory (see holocron config path).
+
+Backups can be encrypted, for copies kept on a USB drive or in cloud storage.
+Choose who can open one:
+  --passphrase       a passphrase you choose (on its own)
+  --ssh-key PUB      an SSH key (its .pub file; repeatable)
+  --sync-key         the sync key, already unlocked on each synced computer
+                     (on its own: age does not mix it with SSH keys)
+
+To encrypt every backup, set backup.encrypt_to in the config, for example:
+  [backup]
+  encrypt_to = ["sync-key"]
+and use --no-encrypt to skip it once. "holocron restore" opens encrypted
+backups. Keep whatever opens them somewhere other than the backup itself:
+without it, an encrypted backup cannot be recovered.`,
+		Example: "  holocron backup\n  holocron backup --output ~/backups/holocron.db\n  holocron backup -o /mnt/usb/ --passphrase\n  holocron backup -o ~/OneDrive/ --sync-key\n  holocron backup -o /mnt/usb/ --ssh-key ~/.ssh/id_ed25519.pub",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := e.open(cmd.Context())
+			ctx := cmd.Context()
+			a, err := e.open(ctx)
 			if err != nil {
 				return err
 			}
-			path, info, err := a.Backup(cmd.Context(), output)
+			var lock devsync.BackupLock
+			if passphrase || syncKey || len(sshKeys) > 0 {
+				if noEncrypt {
+					return usagef("--no-encrypt cannot be combined with --passphrase, --ssh-key or --sync-key")
+				}
+				lock.SyncKey = syncKey
+				if lock.SSHPublicKeys, err = readPublicKeys(sshKeys); err != nil {
+					return err
+				}
+			} else if !noEncrypt {
+				for _, r := range a.Config.Backup.EncryptTo {
+					switch r {
+					case "passphrase":
+						passphrase = true
+					case "sync-key":
+						lock.SyncKey = true
+					default:
+						keys, err := readPublicKeys([]string{r})
+						if err != nil {
+							return fmt.Errorf("backup.encrypt_to: %w", err)
+						}
+						lock.SSHPublicKeys = append(lock.SSHPublicKeys, keys...)
+					}
+				}
+			}
+			if passphrase {
+				if lock.SyncKey || len(lock.SSHPublicKeys) > 0 {
+					return usagef("a passphrase cannot be combined with --ssh-key or --sync-key; choose one")
+				}
+				if lock.Passphrase, err = choosePassphrase(e); err != nil {
+					return err
+				}
+			}
+			var path string
+			var info app.ArchiveInfo
+			if lock.Empty() {
+				path, info, err = a.Backup(ctx, output)
+			} else {
+				path, info, err = a.EncryptedBackup(ctx, output, lock)
+			}
 			if err != nil {
 				return err
 			}
 			if asJSON {
-				return writeJSON(e.io.Out, map[string]any{"path": path, "entries": info.Entries, "projects": info.Projects, "schema_version": info.SchemaVersion, "bytes": info.Size})
+				return writeJSON(e.io.Out, map[string]any{"path": path, "entries": info.Entries, "projects": info.Projects, "schema_version": info.SchemaVersion, "bytes": info.Size, "encrypted": !lock.Empty()})
 			}
 			st := e.out()
-			fmt.Fprintf(e.io.Out, "%s %s\n", st.Success("Backed up"), path)
+			verb := "Backed up"
+			if !lock.Empty() {
+				verb = "Backed up (encrypted)"
+			}
+			fmt.Fprintf(e.io.Out, "%s %s\n", st.Success(verb), path)
 			fmt.Fprintf(e.io.Out, "  %s\n", st.Dim(fmt.Sprintf("%d entries, %d projects, %s, integrity check passed", info.Entries, info.Projects, humanBytes(info.Size))))
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "", "destination file or directory")
+	cmd.Flags().BoolVar(&passphrase, "passphrase", false, "encrypt with a passphrase you choose")
+	cmd.Flags().StringSliceVar(&sshKeys, "ssh-key", nil, "encrypt to this SSH public key file (repeatable)")
+	cmd.Flags().BoolVar(&syncKey, "sync-key", false, "encrypt to the sync key")
+	cmd.Flags().BoolVar(&noEncrypt, "no-encrypt", false, "ignore backup.encrypt_to and write an unencrypted backup")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the result as JSON")
 	return cmd
+}
+
+// readPublicKeys reads SSH public key files.
+func readPublicKeys(paths []string) ([]string, error) {
+	var keys []string
+	for _, p := range paths {
+		pub, err := os.ReadFile(expandPath(p))
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, string(pub))
+	}
+	return keys, nil
 }
 
 func humanBytes(n int64) string {
@@ -304,6 +381,7 @@ func humanBytes(n int64) string {
 
 func newRestoreCmd(e *env) *cobra.Command {
 	var force bool
+	unlock := &unlockFlags{}
 	cmd := &cobra.Command{
 		Use:   "restore <backup-file>",
 		Short: "Replace the archive with a backup (the current archive is backed up first)",
@@ -314,14 +392,34 @@ current archive is then copied to the backups folder as
 holocron-pre-restore-<time>.db, so a restore can itself be undone. Older
 backups are migrated to the current schema after restoring.
 
+Encrypted backups are recognised. A passphrase is asked for; a backup
+encrypted to the sync key opens with the key this computer keeps (or
+sync.key_command, or --key); one encrypted to an SSH key needs --ssh-key with
+the private key.
+
 Close any other running Holocron (such as the TUI) before restoring. You are
 asked to confirm; without a terminal, --force is required.`,
-		Example: "  holocron restore ~/backups/holocron-20261005-090000.db",
+		Example: "  holocron restore ~/backups/holocron-20261005-090000.db\n  holocron restore /mnt/usb/holocron-20261005-090000.db.age --ssh-key ~/.ssh/id_ed25519",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			src := expandPath(args[0])
-			info, err := app.InspectArchive(ctx, src)
+			archive := src
+			kind, err := devsync.InspectBackup(src)
+			if err != nil {
+				return fmt.Errorf("cannot restore %s: %w", src, err)
+			}
+			if kind.Encrypted {
+				u, err := unlock.backup(e, kind, src)
+				if err != nil {
+					return err
+				}
+				if archive, err = app.DecryptBackup(ctx, e.appOptions(), src, u); err != nil {
+					return fmt.Errorf("cannot restore %s: %w", src, err)
+				}
+				defer os.Remove(archive)
+			}
+			info, err := app.InspectArchive(ctx, archive)
 			if err != nil {
 				return fmt.Errorf("cannot restore %s: %w", src, err)
 			}
@@ -346,7 +444,7 @@ asked to confirm; without a terminal, --force is required.`,
 				}
 			}
 			e.close() // the archive must not be open while it is replaced
-			res, err := app.Restore(ctx, e.appOptions(), src)
+			res, err := app.Restore(ctx, e.appOptions(), archive)
 			if err != nil {
 				return err
 			}
@@ -359,6 +457,7 @@ asked to confirm; without a terminal, --force is required.`,
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "restore without asking")
+	unlock.registerForBackup(cmd)
 	return cmd
 }
 

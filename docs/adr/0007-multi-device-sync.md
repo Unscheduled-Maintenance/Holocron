@@ -219,7 +219,9 @@ Each laptop keeps its own config.
   A device that hasn't unlocked the new key gets a clear error, not silent
   failure.
 - The local archive stays unencrypted, as today. This protects the copy held
-  by the cloud provider, not the laptop.
+  by the cloud provider, not the laptop. The reasoning is set out in
+  [docs/security.md](../security.md). Backups can be encrypted with the same
+  keys; see [ADR 0008](0008-encrypted-backups.md).
 
 ### Implementation order
 

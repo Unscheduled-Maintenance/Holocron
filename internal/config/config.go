@@ -51,6 +51,15 @@ type Config struct {
 	Git     GitConfig     `toml:"git"`
 	AI      AIConfig      `toml:"ai"`
 	Sync    SyncConfig    `toml:"sync"`
+	Backup  BackupConfig  `toml:"backup"`
+}
+
+// BackupConfig controls `holocron backup` (docs/adr/0008-encrypted-backups.md).
+type BackupConfig struct {
+	// EncryptTo encrypts backups by default, to "passphrase" (asked for each
+	// time), "sync-key", or SSH public key files ("~/.ssh/id_ed25519.pub").
+	// A passphrase cannot be combined with anything else.
+	EncryptTo []string `toml:"encrypt_to"`
 }
 
 // CaptureConfig controls `holocron add`.
@@ -177,6 +186,14 @@ func (c Config) Validate() error {
 		}
 		if _, err := probe.Parse(v); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		}
+	}
+	for _, r := range c.Backup.EncryptTo {
+		switch {
+		case r == "":
+			errs = append(errs, errors.New("backup.encrypt_to: empty entry"))
+		case (r == "passphrase" || r == "sync-key") && len(c.Backup.EncryptTo) > 1:
+			errs = append(errs, fmt.Errorf("backup.encrypt_to: %q cannot be combined with other recipients", r))
 		}
 	}
 	switch strings.ToLower(c.AI.Provider) {
@@ -373,6 +390,9 @@ const Template = `# Holocron configuration.
 [sync]
 # key_command = "op read op://Private/Holocron/sync-key"   # prints the sync key when the keychain lacks it
 # auto = true               # sync before and after every command (set up with "holocron sync init" or "join")
+
+[backup]
+# encrypt_to = ["sync-key"]   # encrypt "holocron backup" by default: "passphrase", "sync-key" or SSH public key files
 
 [ai]
 # provider = "anthropic"                 # empty disables AI; nothing is sent anywhere

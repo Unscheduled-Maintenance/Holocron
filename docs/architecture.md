@@ -186,7 +186,8 @@ service moves the folder's files.
 - `devsync.Syncer` writes this computer's changes as age-encrypted files in
   its own directory, merges other computers' new files, compacts, and manages
   the key: a keychain cache, `sync.key_command`, passphrase and SSH unlock
-  files.
+  files. It also encrypts and decrypts backups (`EncryptBackup`,
+  `DecryptBackup`, ADR 0008) with the same keys and unlock methods.
 - `app.Open` pulls before a command runs and `env.close` publishes after it
   (the TUI publishes after each change). Sync problems never fail a command:
   they are reported once and sync pauses for that process. The sync commands

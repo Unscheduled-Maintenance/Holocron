@@ -185,6 +185,8 @@ func checkDatabase(ctx context.Context, paths config.Paths, dopts DoctorOptions)
 		}
 	}
 	backups, _ := filepath.Glob(filepath.Join(paths.BackupDir, "*.db"))
+	encrypted, _ := filepath.Glob(filepath.Join(paths.BackupDir, "*.db.age"))
+	backups = append(backups, encrypted...)
 	if len(backups) == 0 {
 		add("backups", CheckWarn, "none in %s; run `holocron backup`", paths.BackupDir)
 	} else {
