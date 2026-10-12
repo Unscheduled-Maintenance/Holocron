@@ -66,6 +66,7 @@ type EntryRecord struct {
 	Marks      []Mark     `json:"marks,omitempty"`
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 	ResolvedBy string     `json:"resolved_by,omitempty"` // entry UID
+	PlannedFor string     `json:"planned_for,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	Source     *Source    `json:"source,omitempty"`
@@ -172,7 +173,7 @@ func (s *Store) ReadRecords(ctx context.Context, changedOnly bool) (Records, err
 	rows, err = s.db.QueryContext(ctx, `
 		SELECT e.id, e.uid, e.num, coalesce(nd.label, ''), coalesce(nd.uid, ''), e.occurred_at, e.utc_offset, e.body, coalesce(e.type, ''),
 		       coalesce(p.uid, ''), e.resolved_at, coalesce(rb.uid, ''), e.created_at, e.updated_at,
-		       e.source_type, e.source_id, e.source_url, e.imported_at, e.clocks
+		       e.source_type, e.source_id, e.source_url, e.imported_at, e.clocks, coalesce(e.planned_for, '')
 		FROM entries e
 		LEFT JOIN devices nd ON nd.id = e.num_device
 		LEFT JOIN projects p ON p.id = e.project_id
@@ -188,7 +189,7 @@ func (s *Store) ReadRecords(ctx context.Context, changedOnly bool) (Records, err
 		var typ, occurred, created, updated, clocks string
 		var resolved, srcType, srcID, srcURL, imported sql.NullString
 		if err := rows.Scan(&id, &r.UID, &r.Num, &r.Label, &r.Device, &occurred, &r.UTCOffset, &r.Body, &typ, &r.Project,
-			&resolved, &r.ResolvedBy, &created, &updated, &srcType, &srcID, &srcURL, &imported, &clocks); err != nil {
+			&resolved, &r.ResolvedBy, &created, &updated, &srcType, &srcID, &srcURL, &imported, &clocks, &r.PlannedFor); err != nil {
 			rows.Close()
 			return out, database.Describe(err)
 		}
@@ -848,6 +849,10 @@ func (m *merger) insertEntry(r EntryRecord) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	planned, err := NormalizeDay(r.PlannedFor)
+	if err != nil {
+		return false, err
+	}
 	pid, err := m.projectID(r.Project)
 	if err != nil {
 		return false, err
@@ -861,11 +866,11 @@ func (m *merger) insertEntry(r EntryRecord) (bool, error) {
 	}
 	res, err := m.tx.ExecContext(m.ctx, `
 		INSERT INTO entries (uid, num, num_device, occurred_at, utc_offset, body, type, project_id, resolved_at,
-		                     created_at, updated_at, source_type, source_id, source_url, imported_at, clocks, dirty)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		                     created_at, updated_at, source_type, source_id, source_url, imported_at, clocks, planned_for, dirty)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
 		r.UID, num, numDevice, formatTime(r.OccurredAt), r.UTCOffset, r.Body, nullString(string(r.Type)), pid,
 		nullTimePtr(r.ResolvedAt), formatTime(r.CreatedAt), formatTime(r.UpdatedAt),
-		src.typ, src.id, src.url, src.at, r.Clocks.encode())
+		src.typ, src.id, src.url, src.at, r.Clocks.encode(), nullString(planned))
 	if err != nil {
 		return false, database.Describe(fmt.Errorf("saving entry: %w", err))
 	}
@@ -987,6 +992,16 @@ func (m *merger) updateEntry(local Entry, clocks Clocks, r EntryRecord) (bool, e
 			link = r.ResolvedBy != ""
 		}
 	}
+	// A record from a Holocron that predates plans carries no plan clock and
+	// no plan, which is not the same as taking the entry off the plan.
+	if h, ok := r.Clocks[FieldPlan]; ok && h.After(clocks.Get(FieldPlan, HLC{})) && r.PlannedFor != local.PlannedFor {
+		planned, err := NormalizeDay(r.PlannedFor)
+		if err != nil {
+			return false, err
+		}
+		sets, args = append(sets, "planned_for = ?"), append(args, nullString(planned))
+		changed = append(changed, FieldPlan)
+	}
 	if len(sets) > 0 {
 		args = append(args, local.ID)
 		if err := m.exec(`UPDATE entries SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...); err != nil {
@@ -1019,6 +1034,12 @@ func (m *merger) updateEntry(local Entry, clocks Clocks, r EntryRecord) (bool, e
 	merged := Clocks{}
 	for _, f := range EntryFields {
 		mine, other := clocks.Get(f, fallbackLocal), r.Clocks.Get(f, fallbackTheirs)
+		if f == FieldPlan {
+			mine, other = clocks.Get(f, HLC{}), r.Clocks.Get(f, HLC{})
+			if mine.IsZero() && other.IsZero() {
+				continue
+			}
+		}
 		if other.After(mine) {
 			merged[f] = other
 		} else {

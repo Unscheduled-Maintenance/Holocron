@@ -79,6 +79,9 @@ const (
 	FieldTags     = "tags"
 	FieldMarks    = "marks"
 	FieldResolved = "resolved"
+	// FieldPlan arrived after the first sync format: a record without a clock
+	// for it says nothing about the plan (see docs/adr/0009-daily-plan.md).
+	FieldPlan = "plan"
 
 	FieldName        = "name"
 	FieldDescription = "description"
@@ -89,7 +92,7 @@ const (
 
 // EntryFields and ProjectFields list the fields with clocks.
 var (
-	EntryFields   = []string{FieldBody, FieldTime, FieldType, FieldProject, FieldTags, FieldMarks, FieldResolved}
+	EntryFields   = []string{FieldBody, FieldTime, FieldType, FieldProject, FieldTags, FieldMarks, FieldResolved, FieldPlan}
 	ProjectFields = []string{FieldName, FieldDescription, FieldArchived, FieldAliases, FieldURLs}
 )
 

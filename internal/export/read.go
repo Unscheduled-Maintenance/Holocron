@@ -87,6 +87,11 @@ func ReadJSON(r io.Reader) (journal.Records, error) {
 		if e.ResolvedBy != nil {
 			rec.ResolvedBy = uidByID[*e.ResolvedBy]
 		}
+		if e.PlannedFor.Present {
+			rec.PlannedFor = e.PlannedFor.Day
+		} else {
+			delete(rec.Clocks, journal.FieldPlan)
+		}
 		out.Entries = append(out.Entries, rec)
 	}
 	return out, nil

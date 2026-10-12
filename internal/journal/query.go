@@ -41,6 +41,8 @@ type Query struct {
 	Marks []Mark
 	// OpenOnly restricts to unresolved problems and follow-ups.
 	OpenOnly bool
+	// PlannedFor restricts to follow-ups planned for this day (YYYY-MM-DD).
+	PlannedFor string
 	// Imported filters by provenance: nil for all, true for imported only,
 	// false for hand-written only.
 	Imported *bool
@@ -63,7 +65,8 @@ SELECT e.id, e.uid, e.occurred_at, e.utc_offset, e.body, coalesce(e.type, ''),
        e.num, coalesce(nd.label, ''),
        coalesce((SELECT r.num || coalesce(rd.label, '')
                  FROM entries r LEFT JOIN devices rd ON rd.id = r.num_device
-                 WHERE r.id = e.resolved_by), '')`
+                 WHERE r.id = e.resolved_by), ''),
+       coalesce(e.planned_for, '')`
 
 const fromEntries = `
 FROM entries e
@@ -211,6 +214,10 @@ func (s *Store) buildWhere(ctx context.Context, q Query) (where []string, args [
 	if q.OpenOnly {
 		where = append(where, "e.type IN ('problem', 'follow-up') AND e.resolved_at IS NULL")
 	}
+	if q.PlannedFor != "" {
+		where = append(where, "e.type = 'follow-up' AND e.planned_for = ?")
+		args = append(args, q.PlannedFor)
+	}
 	if q.Imported != nil {
 		if *q.Imported {
 			where = append(where, "e.source_type IS NOT NULL")
@@ -235,7 +242,7 @@ func scanEntries(rows *sql.Rows, withSnippet bool) ([]Entry, error) {
 		var resolves, resolvedByRef string
 		dest := []any{&e.ID, &e.UID, &occurred, &e.UTCOffset, &e.Body, &typ,
 			&e.ProjectID, &e.Project, &resolved, &created, &updated,
-			&srcType, &srcID, &srcURL, &imported, &e.ResolvedBy, &resolves, &e.Num, &e.Label, &resolvedByRef}
+			&srcType, &srcID, &srcURL, &imported, &e.ResolvedBy, &resolves, &e.Num, &e.Label, &resolvedByRef, &e.PlannedFor}
 		if withSnippet {
 			dest = append(dest, &e.Snippet)
 		}

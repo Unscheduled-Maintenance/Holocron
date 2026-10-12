@@ -269,9 +269,12 @@ type Entry struct {
 	Resolves []int64
 	// ResolvesRefs holds the references of Resolves, in the same order.
 	ResolvesRefs []string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Source       *Source
+	// PlannedFor is the day a follow-up is planned for, as YYYY-MM-DD in
+	// local time, or "".
+	PlannedFor string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	Source     *Source
 
 	// Snippet is set by text searches: a fragment of the body with matches
 	// wrapped in HighlightStart/HighlightEnd.
@@ -321,6 +324,9 @@ func (e Entry) HasTag(t string) bool {
 
 // IsOpen reports whether the entry is an unresolved problem or follow-up.
 func (e Entry) IsOpen() bool { return e.Type.Opens() && e.ResolvedAt == nil }
+
+// IsPlanned reports whether the entry is a follow-up planned for a day.
+func (e Entry) IsPlanned() bool { return e.Type == TypeFollowUp && e.PlannedFor != "" }
 
 // RecordedOffset returns the fixed zone the entry was recorded in.
 func (e Entry) RecordedOffset() *time.Location {

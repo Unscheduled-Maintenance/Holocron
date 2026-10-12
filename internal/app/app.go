@@ -51,6 +51,7 @@ type App struct {
 
 	now       func() time.Time
 	weekStart time.Weekday
+	workWeek  timerange.WorkWeek
 	types     journal.TypeAliases
 
 	syncMu     sync.Mutex
@@ -93,7 +94,9 @@ func newApp(cfg config.Config, paths config.Paths, db *database.DB, opts Options
 	ws, _ := timerange.ParseWeekday(cfg.WeekStart)
 	// Validated with the rest of the configuration in config.Load.
 	types, _ := journal.NewTypeAliases(cfg.TypeAliases)
+	work, _ := timerange.ParseWorkWeek(cfg.WorkDays)
 	a := &App{Config: cfg, Paths: paths, DB: db, Loc: loc, now: now, weekStart: ws, types: types}
+	a.workWeek = work
 	a.Store = journal.NewStore(db, journal.WithClock(now), journal.WithLocation(loc))
 	keychain := opts.Keychain
 	if keychain == nil {
@@ -141,6 +144,9 @@ type CaptureInput struct {
 	// Resolves names open problems or follow-ups ("42", "#42" or a UID) that
 	// this entry resolves.
 	Resolves []string
+	// PlanFor plans the entry for a day (YYYY-MM-DD, see PlanDay), which
+	// makes it a follow-up.
+	PlanFor string
 }
 
 // CaptureResult reports side effects worth telling the person about.
@@ -186,6 +192,12 @@ func (a *App) Capture(ctx context.Context, in CaptureInput) (CaptureResult, erro
 		}
 		typ = t
 	}
+	if in.PlanFor != "" {
+		if typ != journal.TypeNone && typ != journal.TypeFollowUp {
+			return CaptureResult{}, fmt.Errorf("%w: a plan item is a follow-up, not a %s", journal.ErrInvalid, typ)
+		}
+		typ = journal.TypeFollowUp
+	}
 	marks, err := journal.ParseMarks(in.Marks)
 	if err != nil {
 		return CaptureResult{}, err
@@ -226,7 +238,8 @@ func (a *App) Capture(ctx context.Context, in CaptureInput) (CaptureResult, erro
 	e, err := a.Store.AddEntry(ctx, journal.NewEntry{
 		Body: text, OccurredAt: at, Type: typ, Project: project, CreateProject: true,
 		Tags: append(append([]string{}, in.Tags...), sh.Tags...), Marks: marks,
-		Resolves: resolves,
+		Resolves:   resolves,
+		PlannedFor: in.PlanFor,
 	})
 	if err != nil {
 		return CaptureResult{}, err
