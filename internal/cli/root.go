@@ -28,7 +28,7 @@ var (
 	Date    = ""
 )
 
-// Exit codes. Documented in the README.
+// Exit codes. Documented in the wiki (Scripting and Shell Integration).
 const (
 	ExitOK          = 0
 	ExitError       = 1
