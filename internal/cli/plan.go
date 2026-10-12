@@ -213,13 +213,13 @@ func showPlans(ctx context.Context, e *env, a *app.App, asJSON bool) error {
 		return nil
 	}
 	if cur.Day != "" {
-		renderPlan(e.io.Out, a, st, cur, planHeading(a, cur.Day))
+		renderPlan(e.io.Out, st, cur, planHeading(a, cur.Day))
 	}
 	if next.Day != "" {
 		if cur.Day != "" {
 			fmt.Fprintln(e.io.Out)
 		}
-		renderPlan(e.io.Out, a, st, next, "Next: "+a.FormatDay(next.Day))
+		renderPlan(e.io.Out, st, next, "Next: "+a.FormatDay(next.Day))
 	}
 	return nil
 }
@@ -232,7 +232,7 @@ func planHeading(a *app.App, day string) string {
 	return h
 }
 
-func renderPlan(w io.Writer, a *app.App, st style.Styler, p journal.DayPlan, heading string) {
+func renderPlan(w io.Writer, st style.Styler, p journal.DayPlan, heading string) {
 	fmt.Fprintf(w, "%s  %s\n", st.Heading(heading), st.Dim(fmt.Sprintf("%d of %d done", p.Done(), len(p.Items))))
 	for _, en := range p.Items {
 		box, text := st.Warn("○"), en.Title()
