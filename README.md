@@ -39,7 +39,7 @@ with no runtime dependencies.
 - **Download** the archive for your platform from the
   [releases page](https://github.com/Unscheduled-Maintenance/Holocron/releases/latest),
   extract `holocron` (or `holocron.exe`) and put it on your `PATH`.
-- **Or, with Go 1.27.1 or later:**
+- **Or, with Go 1.27.2 or later:**
 
   ```bash
   go install github.com/Unscheduled-Maintenance/Holocron/cmd/holocron@latest
