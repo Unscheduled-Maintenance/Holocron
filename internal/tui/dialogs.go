@@ -31,6 +31,7 @@ const (
 	pickRange
 	pickReport
 	pickMarks
+	pickCarry
 )
 
 type pickItem struct {
@@ -78,6 +79,9 @@ func newPicker(kind pickerKind, items []pickItem, current string) picker {
 		p.title = "Generate a report"
 	case pickMarks:
 		p.title = "Report marks"
+		p.multi = true
+	case pickCarry:
+		p.title = "Carry over"
 		p.multi = true
 	}
 	for i, it := range items {
@@ -212,6 +216,9 @@ func (m Model) updatePicker(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		if p.multi {
+			if p.kind == pickCarry {
+				return m.applyCarry()
+			}
 			return m.applyMarks()
 		}
 		if len(vis) == 0 {

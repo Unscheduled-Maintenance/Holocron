@@ -11,7 +11,7 @@ All timestamps are RFC 3339 in UTC unless the field name says otherwise.
 into an archive by UID (see
 [Export and import](https://github.com/Unscheduled-Maintenance/Holocron/wiki/Export-and-Import)
 in the wiki). It uses `uid`, `ref` (or `id` for files without one), the entry
-fields, `resolved_by`, and projects by name and UID; `repository_paths` are not
+fields, `resolved_by`, `planned_for`, and projects by name and UID; `repository_paths` are not
 imported.
 
 ## Archive export — `holocron.export/v1`
@@ -65,6 +65,7 @@ The same shape is used by the export and by every command's `--json` output.
   "resolved_at": null,
   "resolved_by": null,
   "resolves": [],
+  "planned_for": null,
   "created_at": "2026-10-04T20:14:05.120Z",
   "updated_at": "2026-10-04T20:20:11.003Z",
   "source": null
@@ -86,6 +87,7 @@ The same shape is used by the export and by every command's `--json` output.
 | `resolved_at` | timestamp or null | Set when a problem or follow-up was resolved. |
 | `resolved_by` | integer or null | The `id` of the entry that resolved this one (`holocron add --resolves`), when linked. Added in Holocron 0.3. |
 | `resolves` | array of integers | The `id`s of entries this one resolved, sorted. Empty when none. Added in Holocron 0.3. |
+| `planned_for` | string or null | The day a follow-up is planned for (`holocron plan`), as a local `YYYY-MM-DD` date ([ADR 0009](adr/0009-daily-plan.md)). Exports without this field leave plans unchanged on import; `null` takes the entry off its plan. Added in Holocron 0.7. |
 | `created_at`, `updated_at` | timestamp | Record bookkeeping. |
 | `source` | object or null | Provenance for imported entries: `{"type": "git", "id": "<commit hash>", "url": "...", "imported_at": "..."}`. `url` is omitted when unknown. |
 

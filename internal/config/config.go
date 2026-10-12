@@ -37,6 +37,9 @@ type Config struct {
 	Editor string `toml:"editor"`
 	// WeekStart is the first day of the week ("monday" or "sunday").
 	WeekStart string `toml:"week_start"`
+	// WorkDays are the days worked, for planning the next working day.
+	// Empty means Monday to Friday.
+	WorkDays []string `toml:"work_days"`
 	// Clock is "24h" or "12h".
 	Clock string `toml:"clock"`
 
@@ -127,6 +130,7 @@ func Default() Config {
 	shorthand, create := true, true
 	return Config{
 		WeekStart:   "monday",
+		WorkDays:    []string{"monday", "tuesday", "wednesday", "thursday", "friday"},
 		Clock:       "24h",
 		TypeAliases: journal.DefaultTypeAliases(),
 		Capture:     CaptureConfig{Shorthand: &shorthand, CreateProjects: &create},
@@ -159,6 +163,9 @@ func (c Config) Validate() error {
 	var errs []error
 	if _, err := timerange.ParseWeekday(c.WeekStart); err != nil {
 		errs = append(errs, fmt.Errorf("week_start: %w", err))
+	}
+	if _, err := timerange.ParseWorkWeek(c.WorkDays); err != nil {
+		errs = append(errs, fmt.Errorf("work_days: %w", err))
 	}
 	switch strings.ToLower(c.Clock) {
 	case "", "24h", "12h":
@@ -360,6 +367,7 @@ const Template = `# Holocron configuration.
 # database = "~/holocron/holocron.db"   # default: the platform data directory
 # editor = "code --wait"                # default: $VISUAL, then $EDITOR
 # week_start = "monday"                 # or "sunday"
+# work_days = ["mon", "tue", "wed", "thu", "fri"]  # plans for "tomorrow" skip other days
 # clock = "24h"                         # or "12h"
 
 [capture]

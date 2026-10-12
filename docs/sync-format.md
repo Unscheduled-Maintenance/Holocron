@@ -94,6 +94,7 @@ never by local row number.
     "occurred_at": "…", "utc_offset": 46800, "body": "ARM approved",
     "type": "", "project": "<project uid>", "tags": ["arm"], "marks": [],
     "resolved_at": null, "resolved_by": "<entry uid>",
+    "planned_for": "2026-10-13",
     "created_at": "…", "updated_at": "…", "source": null,
     "clocks": {"body": "1791278721245.000000.01M488GA…", "tags": "…"}
   }],
@@ -105,7 +106,7 @@ never by local row number.
 | Field | Meaning |
 |---|---|
 | `num`, `label`, `device` | The entry's number. With a label it is shown as `#2b`; `device` is the UID of the computer that issued the number. Without a label it is a plain number from before sync. |
-| `clocks` | When each field last changed, as a hybrid logical clock: `<unix ms, 13 digits>.<counter, 6 digits>.<device uid>`. Entry fields: `body`, `time` (with `utc_offset`), `type`, `project`, `tags`, `marks`, `resolved` (with `resolved_by`). Project fields: `name`, `description`, `archived`, `aliases`, `urls`. |
+| `clocks` | When each field last changed, as a hybrid logical clock: `<unix ms, 13 digits>.<counter, 6 digits>.<device uid>`. Entry fields: `body`, `time` (with `utc_offset`), `type`, `project`, `tags`, `marks`, `resolved` (with `resolved_by`), `plan` (with `planned_for`). A record with no `plan` clock leaves the plan unchanged: computers running Holocron before 0.7 publish neither ([ADR 0009](adr/0009-daily-plan.md)). Project fields: `name`, `description`, `archived`, `aliases`, `urls`. |
 | `tombstones` | Deleted entries and projects, with the clock of the delete. |
 | `reports` | Reports recorded with `holocron report … --record`, so `--since last` works on every computer. |
 

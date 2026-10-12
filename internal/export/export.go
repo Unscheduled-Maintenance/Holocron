@@ -77,6 +77,7 @@ type EntryJSON struct {
 	ResolvedAt *time.Time      `json:"resolved_at"`
 	ResolvedBy *int64          `json:"resolved_by"`
 	Resolves   []int64         `json:"resolves"`
+	PlannedFor optionalDay     `json:"planned_for"`
 	CreatedAt  time.Time       `json:"created_at"`
 	UpdatedAt  time.Time       `json:"updated_at"`
 	Source     *journal.Source `json:"source"`
@@ -205,6 +206,9 @@ func metaLine(e journal.Entry) string {
 		}
 		parts = append(parts, "type: "+t)
 	}
+	if e.IsPlanned() {
+		parts = append(parts, "planned for: "+e.PlannedFor)
+	}
 	if len(e.Tags) > 0 {
 		tags := make([]string, len(e.Tags))
 		for i, t := range e.Tags {
@@ -293,5 +297,34 @@ func NewEntryJSON(e journal.Entry) EntryJSON {
 		by := e.ResolvedBy
 		je.ResolvedBy = &by
 	}
+	if e.IsPlanned() {
+		je.PlannedFor = optionalDay{Day: e.PlannedFor}
+	}
 	return je
+}
+
+// optionalDay is the planned_for field: a day, or null. Exports made before
+// plans existed have no planned_for at all, which Present tells apart from
+// null so importing one never takes an entry off a plan.
+type optionalDay struct {
+	Day     string
+	Present bool
+}
+
+// MarshalJSON writes the day, or null.
+func (d optionalDay) MarshalJSON() ([]byte, error) {
+	if d.Day == "" {
+		return []byte("null"), nil
+	}
+	return json.Marshal(d.Day)
+}
+
+// UnmarshalJSON reads a day or null.
+func (d *optionalDay) UnmarshalJSON(b []byte) error {
+	d.Present = true
+	if string(b) == "null" {
+		d.Day = ""
+		return nil
+	}
+	return json.Unmarshal(b, &d.Day)
 }

@@ -26,7 +26,7 @@ func (m Model) headerHeight() int {
 	if m.compact() {
 		return 1
 	}
-	return 3 // title, filter bar, rule
+	return 3 + m.planHeight() // title, filter bar, rule, plan panel
 }
 
 func (m Model) footerHeight() int {
@@ -34,7 +34,7 @@ func (m Model) footerHeight() int {
 	if !m.compact() {
 		h++ // rule
 	}
-	if m.layer == layerAdd || m.layer == layerSearch || m.layer == layerSavePath {
+	if m.layer == layerAdd || m.layer == layerSearch || m.layer == layerSavePath || m.layer == layerPlan {
 		h++
 	}
 	return h
@@ -168,7 +168,11 @@ func (m Model) renderHeader() string {
 	if m.compact() {
 		return line1 + "\n"
 	}
-	return line1 + "\n" + m.filterBar() + "\n" + sRule.Render(strings.Repeat("─", m.width)) + "\n"
+	head := line1 + "\n" + m.filterBar() + "\n" + sRule.Render(strings.Repeat("─", m.width)) + "\n"
+	if m.planShown() {
+		head += m.renderPlan()
+	}
+	return head
 }
 
 // filterBar shows the active range and filters as labelled chips, so state
@@ -383,6 +387,9 @@ func (m Model) detailText(e journal.Entry, width int) string {
 			row("Status", sWarn.Render("open")+sFaint.Render("  (x resolves)"))
 		}
 	}
+	if e.IsPlanned() {
+		row("Planned", m.app.FormatDay(e.PlannedFor))
+	}
 	if len(e.Resolves) > 0 {
 		row("Resolves", strings.Join(e.ResolvesRefs, ", "))
 	}
@@ -427,7 +434,7 @@ func (m Model) renderFooter() string {
 	if !m.compact() {
 		b.WriteString(sRule.Render(strings.Repeat("─", m.width)) + "\n")
 	}
-	if m.layer == layerAdd || m.layer == layerSearch || m.layer == layerSavePath {
+	if m.layer == layerAdd || m.layer == layerSearch || m.layer == layerSavePath || m.layer == layerPlan {
 		b.WriteString(" " + m.input.View() + "\n")
 	}
 	if m.status != "" {
@@ -451,10 +458,16 @@ func (m Model) keyHints() []string {
 		hs = []string{hint("enter", "save"), hint("esc", "cancel"), hint("+project #tag", "shorthand")}
 	case layerSearch:
 		hs = []string{hint("enter", "keep results"), hint("esc", "cancel search")}
+	case layerPlan:
+		hs = []string{hint("enter", "add item"), hint("esc", "done"), hint("+project #tag", "shorthand")}
 	case layerSavePath:
 		hs = []string{hint("enter", "save Markdown"), hint("esc", "cancel")}
 	case layerPicker:
 		if m.picker.multi {
+			if m.picker.kind == pickCarry {
+				hs = []string{hint("space", "carry over"), hint("enter", "continue"), hint("esc", "cancel")}
+				break
+			}
 			hs = []string{hint("space", "toggle"), hint("enter", "apply"), hint("esc", "cancel")}
 		} else {
 			hs = []string{hint("↑↓", "move"), hint("type", "filter"), hint("enter", "choose"), hint("esc", "cancel")}
@@ -472,7 +485,11 @@ func (m Model) keyHints() []string {
 		case screenReport:
 			hs = []string{hint("esc", "back"), hint("tab", "next report"), hint("[ ]", "period"), hint("i", "ids"), hint("w", "why"), hint("s", "save"), hint("?", "help")}
 		default:
-			hs = []string{hint("a", "add"), hint("/", "search"), hint("enter", "open"), hint("e", "edit"), hint("p t y", "filter"),
+			if m.planFocus {
+				hs = []string{hint("x", "done / undone"), hint("e", "edit"), hint("P", "plan next day"), hint("tab", "back to list")}
+				break
+			}
+			hs = []string{hint("a", "add"), hint("P", "plan"), hint("/", "search"), hint("enter", "open"), hint("e", "edit"), hint("p t y", "filter"),
 				hint("r [ ]", "range"), hint("R", "reports")}
 			if m.f.active() {
 				hs = append(hs, hint("esc", "clear filters"))
@@ -493,6 +510,7 @@ func (m Model) renderHelp() string {
 			{"d", "delete (asks first)"}, {"u", "undo last delete"}, {"m", "report marks"}, {"x", "resolve / reopen"}}},
 		{"Find", [][2]string{{"/", "search as you type"}, {"p", "filter by project"}, {"t", "filter by tag"}, {"y", "filter by type"},
 			{"o", "open items only"}, {"r", "choose date range"}, {"[ ]", "previous / next period"}, {"ctrl+r", "reload"}}},
+		{"Plan", [][2]string{{"P", "plan the next working day"}, {"tab", "focus the plan (x done, e edit)"}}},
 		{"Reports", [][2]string{{"R", "generate a report"}, {"tab", "next report kind"}, {"i", "show entry ids"}, {"w", "show why items appear"}, {"s", "save as Markdown"}}},
 		{"Leave", [][2]string{{"esc", "back one level: close dialog, leave screen, clear filters"}, {"q", "quit (from the list)"}, {"ctrl+c", "quit from anywhere"}}},
 	}

@@ -323,6 +323,14 @@ func reasonsFor(e journal.Entry, audience journal.Mark) []string {
 			rs = append(rs, "type "+string(e.Type))
 		}
 	}
+	if e.IsOpen() && e.IsPlanned() {
+		// Which plan an unfinished item came from (docs/adr/0009-daily-plan.md).
+		day := e.PlannedFor
+		if d, err := time.Parse(journal.DayLayout, day); err == nil {
+			day = d.Format("Mon 2 Jan 2006")
+		}
+		rs = append(rs, "planned for "+day)
+	}
 	if e.Source != nil {
 		rs = append(rs, "imported from "+e.Source.Type)
 	}

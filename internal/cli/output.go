@@ -85,7 +85,7 @@ func renderList(w io.Writer, a *app.App, st style.Styler, es []journal.Entry, o 
 		} else if strings.Contains(e.Body, "\n") {
 			text += " …"
 		}
-		meta := metaSuffix(st, e)
+		meta := metaSuffix(a, st, e)
 		metaWidth := lipgloss.Width(meta)
 
 		if o.width > 0 {
@@ -115,7 +115,7 @@ func renderList(w io.Writer, a *app.App, st style.Styler, es []journal.Entry, o 
 	}
 }
 
-func metaSuffix(st style.Styler, e journal.Entry) string {
+func metaSuffix(a *app.App, st style.Styler, e journal.Entry) string {
 	var parts []string
 	if e.Type != "" {
 		label := string(e.Type)
@@ -125,6 +125,9 @@ func metaSuffix(st style.Styler, e journal.Entry) string {
 		parts = append(parts, st.Warn("open"))
 	} else if e.Type.Opens() && e.ResolvedAt != nil {
 		parts = append(parts, st.Dim("resolved"))
+	}
+	if e.IsPlanned() {
+		parts = append(parts, st.Dim("planned "+a.FormatDay(e.PlannedFor)))
 	}
 	for _, t := range e.Tags {
 		parts = append(parts, st.Tag("#"+t))
@@ -258,6 +261,9 @@ func renderDetail(w io.Writer, a *app.App, st style.Styler, e journal.Entry, md 
 			row("Status", st.Warn("open"))
 		}
 	}
+	if e.IsPlanned() {
+		row("Planned", a.FormatDay(e.PlannedFor))
+	}
 	if len(e.Resolves) > 0 {
 		row("Resolves", strings.Join(e.ResolvesRefs, ", "))
 	}
@@ -287,7 +293,7 @@ func summaryLine(a *app.App, st style.Styler, e journal.Entry) string {
 		parts = append(parts, st.Project(e.Project))
 	}
 	parts = append(parts, truncate(e.Title(), 60))
-	if m := metaSuffix(st, e); m != "" {
+	if m := metaSuffix(a, st, e); m != "" {
 		parts = append(parts, m)
 	}
 	return strings.Join(parts, "  ")

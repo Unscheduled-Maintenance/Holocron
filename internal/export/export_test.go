@@ -119,3 +119,46 @@ func TestReadJSONRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestPlannedForRoundTrip(t *testing.T) {
+	a := sample()
+	a.Entries[1].Type, a.Entries[1].ResolvedAt, a.Entries[1].PlannedFor = journal.TypeFollowUp, nil, "2026-10-13"
+	var buf bytes.Buffer
+	if err := JSON(&buf, a); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"planned_for": "2026-10-13"`) || !strings.Contains(buf.String(), `"planned_for": null`) {
+		t.Fatalf("planned_for not exported:\n%s", buf.String())
+	}
+	recs, err := ReadJSON(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unplanned, planned := recs.Entries[0], recs.Entries[1]
+	if planned.PlannedFor != "2026-10-13" || planned.Clocks[journal.FieldPlan].IsZero() {
+		t.Errorf("planned = %q %v", planned.PlannedFor, planned.Clocks)
+	}
+	// null is an explicit "not planned", so it carries a clock.
+	if unplanned.PlannedFor != "" || unplanned.Clocks[journal.FieldPlan].IsZero() {
+		t.Errorf("unplanned = %q %v", unplanned.PlannedFor, unplanned.Clocks)
+	}
+
+	// An export from before plans says nothing about them.
+	old := `{"format": "holocron.export/v1", "entries": [{"id": 1, "uid": "01J0000000000000000000000A", "body": "x",
+		"updated_at": "2026-10-05T09:14:00Z"}]}`
+	recs, err = ReadJSON(strings.NewReader(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := recs.Entries[0].Clocks[journal.FieldPlan]; ok {
+		t.Errorf("old export has a plan clock: %v", recs.Entries[0].Clocks)
+	}
+
+	var md bytes.Buffer
+	if err := Markdown(&md, a, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(md.String(), "type: follow-up (open) · planned for: 2026-10-13") {
+		t.Errorf("markdown:\n%s", md.String())
+	}
+}

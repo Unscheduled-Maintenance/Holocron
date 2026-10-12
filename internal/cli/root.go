@@ -214,7 +214,7 @@ Run holocron with no arguments in a terminal to open the interactive archive.`,
 			root.AddCommand(c)
 		}
 	}
-	add("capture", newAddCmd(e), newNowCmd(e))
+	add("capture", newAddCmd(e), newNowCmd(e), newPlanCmd(e))
 	add("browse", newDayCmd(e, "today", "Show today's entries", "today"),
 		newDayCmd(e, "yesterday", "Show yesterday's entries", "yesterday"),
 		newDayCmd(e, "week", "Show this week's entries", "this-week"),

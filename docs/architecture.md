@@ -109,11 +109,11 @@ Holocron imports a vendor SDK (ADR 0006).
   renames re-index affected entries. `holocron doctor` verifies the index;
   `--rebuild-index` regenerates it.
 
-### Schema (version 4)
+### Schema (version 5)
 
 | Table | Purpose |
 |---|---|
-| `entries` | `id` (AUTOINCREMENT, internal), `uid` (ULID), `num` and `num_device` (the number people see: `#42`, or `#12a` for device `a`; unique together; version 4), `clocks` (per-field change clocks) and `dirty` (changed since last published) for sync (version 4), `occurred_at`, `utc_offset`, `body`, `type`, `project_id` → projects (SET NULL), `resolved_at`, `resolved_by` → the entry that resolved it (SET NULL; version 2), `created_at`, `updated_at`, provenance (`source_type`, `source_id`, `source_url`, `imported_at`; unique on type+id) |
+| `entries` | `id` (AUTOINCREMENT, internal), `uid` (ULID), `num` and `num_device` (the number people see: `#42`, or `#12a` for device `a`; unique together; version 4), `clocks` (per-field change clocks) and `dirty` (changed since last published) for sync (version 4), `occurred_at`, `utc_offset`, `body`, `type`, `project_id` → projects (SET NULL), `resolved_at`, `resolved_by` → the entry that resolved it (SET NULL; version 2), `created_at`, `updated_at`, provenance (`source_type`, `source_id`, `source_url`, `imported_at`; unique on type+id), `planned_for` (the day a follow-up is planned for, `YYYY-MM-DD`; version 5, ADR 0009) |
 | `projects` | `id`, `uid`, `name` (unique, case-insensitive), `description`, `archived_at`, timestamps |
 | `project_aliases` | `alias` (unique, case-insensitive) → project |
 | `project_links` | repository `path`s and `url`s per project |

@@ -60,6 +60,8 @@ type NewEntry struct {
 	// Resolves lists open problems or follow-ups this entry resolves; they
 	// are resolved at the entry's time and linked to it.
 	Resolves []int64
+	// PlannedFor plans a follow-up for a day (YYYY-MM-DD); see NormalizeDay.
+	PlannedFor string
 }
 
 // AddEntry creates an entry, its tags and marks, and its search index row
@@ -93,6 +95,13 @@ func (s *Store) insertEntry(ctx context.Context, tx *sql.Tx, n NewEntry, keep *E
 		if _, err := ParseType(string(n.Type)); err != nil {
 			return 0, err
 		}
+	}
+	planned, err := NormalizeDay(n.PlannedFor)
+	if err != nil {
+		return 0, err
+	}
+	if planned != "" && n.Type != TypeFollowUp {
+		return 0, errPlanType
 	}
 	tags, err := NormalizeTags(n.Tags)
 	if err != nil {
@@ -154,10 +163,10 @@ func (s *Store) insertEntry(ctx context.Context, tx *sql.Tx, n NewEntry, keep *E
 	}
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO entries (id, uid, num, num_device, occurred_at, utc_offset, body, type, project_id,
-		                     created_at, updated_at, source_type, source_id, source_url, imported_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                     created_at, updated_at, source_type, source_id, source_url, imported_at, planned_for)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		idArg, uid, num, numDevice, formatTime(at), offset, body, nullString(string(n.Type)), projectID,
-		formatTime(now), formatTime(now), src.typ, src.id, src.url, src.at)
+		formatTime(now), formatTime(now), src.typ, src.id, src.url, src.at, nullString(planned))
 	if err != nil {
 		if isUniqueViolation(err) && n.Source != nil {
 			return 0, fmt.Errorf("%w: %s %s has already been imported", ErrConflict, n.Source.Type, n.Source.ID)
@@ -281,13 +290,16 @@ type Patch struct {
 	RemoveMarks []Mark
 	// Resolved marks a problem or follow-up as resolved (true) or reopens it.
 	Resolved *bool
+	// PlannedFor plans a follow-up for a day (YYYY-MM-DD); a pointer to ""
+	// takes it off the plan.
+	PlannedFor *string
 }
 
 // IsEmpty reports whether the patch changes nothing.
 func (p Patch) IsEmpty() bool {
 	return p.Body == nil && p.OccurredAt == nil && p.Type == nil && p.Project == nil &&
 		p.Tags == nil && len(p.AddTags) == 0 && len(p.RemoveTags) == 0 &&
-		p.Marks == nil && len(p.AddMarks) == 0 && len(p.RemoveMarks) == 0 && p.Resolved == nil
+		p.Marks == nil && len(p.AddMarks) == 0 && len(p.RemoveMarks) == 0 && p.Resolved == nil && p.PlannedFor == nil
 }
 
 // Update applies a patch atomically and returns the updated entry.
@@ -354,6 +366,22 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (Entry, error) {
 				sets = append(sets, "resolved_by = NULL")
 			}
 			fields = append(fields, FieldResolved)
+		}
+		if p.PlannedFor != nil {
+			planned, err := NormalizeDay(*p.PlannedFor)
+			if err != nil {
+				return err
+			}
+			typ := cur.Type
+			if p.Type != nil {
+				typ = *p.Type
+			}
+			if planned != "" && typ != TypeFollowUp {
+				return errPlanType
+			}
+			sets = append(sets, "planned_for = ?")
+			args = append(args, nullString(planned))
+			fields = append(fields, FieldPlan)
 		}
 		args = append(args, id)
 		if _, err := tx.ExecContext(ctx, `UPDATE entries SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...); err != nil {
@@ -443,6 +471,9 @@ func (s *Store) Restore(ctx context.Context, e Entry) (Entry, error) {
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
 		n := NewEntry{Body: e.Body, OccurredAt: e.OccurredAt, Type: e.Type, Project: e.Project,
 			CreateProject: true, Tags: e.Tags, Marks: e.Marks, Source: e.Source}
+		if e.IsPlanned() {
+			n.PlannedFor = e.PlannedFor
+		}
 		if _, err := s.insertEntry(ctx, tx, n, &e); err != nil {
 			return err
 		}

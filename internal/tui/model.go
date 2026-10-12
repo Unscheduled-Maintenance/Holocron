@@ -49,6 +49,7 @@ const (
 	layerForm
 	layerHelp
 	layerSavePath
+	layerPlan
 )
 
 // rangePresets are offered by the range picker and cycled with [ and ].
@@ -114,6 +115,11 @@ type Model struct {
 	rowCache []row // day headings and entries for the list, built per load
 	entryRow []int // row index of each entry in rowCache
 
+	plan, nextPlan journal.DayPlan // shown in the plan panel
+	planFocus      bool            // keys go to the plan panel
+	planCursor     int
+	planDay        string // the day being planned, while the plan input is open
+
 	// dark is the terminal background, used to pick the Markdown palette.
 	dark bool
 }
@@ -150,7 +156,7 @@ func (m *Model) setRangeKey(key string) {
 
 // Init loads the first page of entries. New has already marked the model as
 // loading, because changes Init makes to its value receiver are discarded.
-func (m Model) Init() tea.Cmd { return tea.Batch(m.load(), tea.RequestBackgroundColor) }
+func (m Model) Init() tea.Cmd { return tea.Batch(m.load(), m.loadPlans(), tea.RequestBackgroundColor) }
 
 // Messages.
 type (
@@ -203,7 +209,7 @@ func (m *Model) reload() tea.Cmd {
 	m.seq++
 	m.loading = true
 	m.loadingMore = false // any page still in flight belongs to the old sequence
-	return m.load()
+	return tea.Batch(m.load(), m.loadPlans())
 }
 
 // load returns a command that fetches entries for the current sequence.
@@ -293,7 +299,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.created != "" {
 			text += fmt.Sprintf(" · created project %s", msg.created)
 		}
-		if !m.f.rng.Contains(msg.entry.OccurredAt) {
+		if !m.f.rng.Contains(msg.entry.OccurredAt) && !msg.entry.IsPlanned() {
 			text += " (outside the current range)"
 		}
 		m.setStatus(text, false)
@@ -335,6 +341,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case editorDoneMsg:
 		return m.finishExternalEdit(msg)
+
+	case plansMsg:
+		return m.applyPlans(msg), nil
+
+	case plannedMsg:
+		return m.finishPlanned(msg)
 
 	case statusMsg:
 		m.setStatus(msg.text, msg.isErr)
@@ -389,7 +401,7 @@ func (m *Model) selectID(id int64) {
 // handleKey routes a key press to the open layer, then the screen.
 func (m Model) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch m.layer {
-	case layerAdd, layerSearch, layerSavePath:
+	case layerAdd, layerSearch, layerSavePath, layerPlan:
 		return m.updateLayerInput(k)
 	case layerPicker:
 		return m.updatePicker(k)
@@ -409,6 +421,9 @@ func (m Model) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.updateDetail(k)
 	case screenReport:
 		return m.updateReport(k)
+	}
+	if m.planFocus && m.screen == screenList {
+		return m.updatePlanPanel(k)
 	}
 	return m.updateList(k)
 }
@@ -503,6 +518,14 @@ func (m Model) updateList(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.f.rng = m.app.Clock().Shift(m.f.rng, step)
 		m.f.rangeKey = ""
 		return m, m.reload()
+	case "P":
+		return m.openPlan()
+	case "tab":
+		if len(m.plan.Items) > 0 && m.planShown() {
+			m.planFocus = true
+			return m, nil
+		}
+		m.setStatus("No plan to focus · P plans the next working day", false)
 	case "R":
 		return m, m.loadPicker(pickReport)
 	case "ctrl+r", "f5":
@@ -611,7 +634,7 @@ func (m Model) updateLayerInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.layer == layerForm {
 		return m.updateForm(msg)
 	}
-	if m.layer != layerAdd && m.layer != layerSearch && m.layer != layerSavePath {
+	if m.layer != layerAdd && m.layer != layerSearch && m.layer != layerSavePath && m.layer != layerPlan {
 		return m, nil
 	}
 	if k, ok := msg.(tea.KeyPressMsg); ok {
@@ -625,6 +648,9 @@ func (m Model) updateLayerInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.layer = layerNone
 			return m, nil
 		case "enter":
+			if m.layer == layerPlan {
+				return m.submitPlanItem()
+			}
 			return m.submitInput()
 		}
 	}
