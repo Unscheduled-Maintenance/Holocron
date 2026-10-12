@@ -25,7 +25,11 @@ func newHarness(t *testing.T) *harness {
 	t.Setenv(config.EnvDB, "")
 	t.Setenv(config.EnvData, filepath.Join(dir, "data"))
 	t.Setenv(config.EnvConfig, filepath.Join(dir, "config.toml"))
-	if err := os.WriteFile(filepath.Join(dir, "config.toml"), nil, 0o600); err != nil {
+	// Without this, staff reports run on the first day of the week cover last
+	// week and miss the entries a test just added. The early-days rule has its
+	// own clock-driven tests in internal/app and internal/report.
+	cfg := []byte("[reports]\nstaff_early_days = 0\n")
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), cfg, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("NO_COLOR", "")
