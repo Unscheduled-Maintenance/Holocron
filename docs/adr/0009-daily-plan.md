@@ -83,7 +83,7 @@ The sync format stays `holocron.sync/v1` and the export format stays
 - One migration and one more merged field, but no new concept in the merge
   engine beyond "a missing clock is not a change".
 - Reports barely change: plan items are follow-ups and already appear
-  where open follow-ups do. An open one's reasons (`--why`) say which plan
+  where open follow-ups do. An open one's reasons (`--explain`) say which plan
   it came from; `holocron list` shows the same as "planned <day>".
 - An archive at schema version 5 can't be opened by an older Holocron (ADR
   0003), but it still syncs with one.
