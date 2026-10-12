@@ -142,6 +142,7 @@ func addWithEditor(ctx context.Context, e *env, a *app.App, f *addFlags, initial
 	doc.Project, doc.Type = f.project, f.typ
 	doc.Tags = strings.Join(f.tags, ", ")
 	doc.Marks = strings.Join(f.marks, ", ")
+	doc.Resolves = strings.Join(f.resolves, ", ")
 	if f.at != "" {
 		doc.Time = f.at
 	}
@@ -153,7 +154,7 @@ func addWithEditor(ctx context.Context, e *env, a *app.App, f *addFlags, initial
 	if err != nil {
 		return err
 	}
-	res, err := a.CreateFromDoc(ctx, parsed, f.resolves...)
+	res, err := a.CreateFromDoc(ctx, parsed)
 	if errors.Is(err, app.ErrEmptyEntry) {
 		e.note("Nothing saved: the entry text was empty.")
 		return nil

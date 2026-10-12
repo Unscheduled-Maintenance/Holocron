@@ -25,7 +25,12 @@ type EntryDoc struct {
 	Tags     string
 	Marks    string
 	Resolved string // "yes"/"no"; only meaningful for problems and follow-ups
+	// Resolves names open items a new entry resolves ("42, #43" or UIDs).
+	// Only a new entry can resolve items.
+	Resolves string
 	Body     string
+
+	isNew bool // from DocFor(nil): Format offers the resolves field
 }
 
 const docHelp = `# Edit the fields and the text below the --- line, then save and close.
@@ -35,10 +40,16 @@ const docHelp = `# Edit the fields and the text below the --- line, then save an
 # marks: staff, one-on-one, quarterly, important, cross-team (report signals)
 `
 
+const docResolvesHelp = "# resolves: open problems or follow-ups this entry resolves (42, #43)\n"
+
+// ErrResolvesOnEdit is returned when an edited document for an existing
+// entry names items to resolve: only a new entry can resolve items.
+var ErrResolvesOnEdit = fmt.Errorf("%w: resolves can only be set when adding an entry; capture what resolved it as a new entry instead", journal.ErrInvalid)
+
 // DocFor renders an entry (or a blank new entry) as an EntryDoc.
 func (a *App) DocFor(e *journal.Entry) EntryDoc {
 	if e == nil {
-		return EntryDoc{Time: "now"}
+		return EntryDoc{Time: "now", isNew: true}
 	}
 	d := EntryDoc{
 		Time:    e.OccurredAt.In(a.Loc).Format("2006-01-02 15:04"),
@@ -66,9 +77,15 @@ func (d EntryDoc) Format(title string) string {
 	var b strings.Builder
 	b.WriteString("# " + title + "\n")
 	b.WriteString(docHelp)
+	if d.isNew {
+		b.WriteString(docResolvesHelp)
+	}
 	fmt.Fprintf(&b, "time: %s\nproject: %s\ntype: %s\ntags: %s\nmarks: %s\n", d.Time, d.Project, d.Type, d.Tags, d.Marks)
 	if d.Resolved != "" {
 		fmt.Fprintf(&b, "resolved: %s\n", d.Resolved)
+	}
+	if d.isNew || d.Resolves != "" {
+		fmt.Fprintf(&b, "resolves: %s\n", d.Resolves)
 	}
 	b.WriteString("---\n")
 	b.WriteString(d.Body)
@@ -116,6 +133,8 @@ func ParseEntryDoc(text string) (EntryDoc, error) {
 			d.Marks = val
 		case "resolved":
 			d.Resolved = strings.ToLower(val)
+		case "resolves":
+			d.Resolves = val
 		default:
 			return d, fmt.Errorf("%w: unknown field %q on line %d", journal.ErrInvalid, key, i+1)
 		}
@@ -144,9 +163,9 @@ func parseYesNo(s string) (bool, error) {
 	return false, fmt.Errorf("%w: resolved should be yes or no, not %q", journal.ErrInvalid, s)
 }
 
-// CreateFromDoc saves a new entry from an edited document.
-// resolves names open items the new entry resolves, as in CaptureInput.
-func (a *App) CreateFromDoc(ctx context.Context, d EntryDoc, resolves ...string) (CaptureResult, error) {
+// CreateFromDoc saves a new entry from an edited document, resolving the
+// items its resolves field names.
+func (a *App) CreateFromDoc(ctx context.Context, d EntryDoc) (CaptureResult, error) {
 	if d.Body == "" {
 		return CaptureResult{}, ErrEmptyEntry
 	}
@@ -155,7 +174,7 @@ func (a *App) CreateFromDoc(ctx context.Context, d EntryDoc, resolves ...string)
 		at = ""
 	}
 	res, err := a.Capture(ctx, CaptureInput{Text: d.Body, Project: d.Project, Type: d.Type,
-		Tags: splitField(d.Tags), Marks: splitField(d.Marks), At: at, Raw: true, Resolves: resolves})
+		Tags: splitField(d.Tags), Marks: splitField(d.Marks), At: at, Raw: true, Resolves: splitField(d.Resolves)})
 	if err != nil {
 		return res, err
 	}
@@ -172,6 +191,9 @@ func (a *App) PatchFromDoc(e journal.Entry, d EntryDoc) (journal.Patch, error) {
 	orig := a.DocFor(&e)
 	if d.Body == "" {
 		return p, ErrEmptyEntry
+	}
+	if d.Resolves != "" {
+		return p, ErrResolvesOnEdit
 	}
 	if d.Body != orig.Body {
 		p.Body = &d.Body

@@ -373,6 +373,10 @@ func TestNewEntryForm(t *testing.T) {
 	m = typeText(t, m, "terraform, pairing")
 	m = send(t, m, key("tab"))
 	m = typeText(t, m, "staff")
+	m = send(t, m, key("enter"))
+	if m.form.focus != fieldResolves {
+		t.Fatalf("a new entry's last field should be Resolves, focus = %d", m.form.focus)
+	}
 	m = send(t, m, key("enter")) // enter on the last field saves
 	c := m.current()
 	if c == nil || c.Title() != "Paired on Terraform modules" || c.Project != "Infra" || !c.HasTag("pairing") || !c.HasMark(journal.MarkStaff) {
@@ -450,6 +454,55 @@ func TestMarksAndResolve(t *testing.T) {
 	m = send(t, m, key("x"))
 	if !m.current().IsOpen() {
 		t.Fatal("x again should reopen")
+	}
+}
+
+func TestResolveWithNewEntry(t *testing.T) {
+	ctx := context.Background()
+	m := start(t, 100, 30)
+	if c := m.current(); c == nil || c.Ref() != "#6" || !c.IsOpen() {
+		t.Fatalf("expected the open follow-up #6 first: %+v", c)
+	}
+
+	// X opens a new-entry form that resolves the selected item.
+	m = send(t, m, key("enter"), key("X"))
+	if m.layer != layerForm || m.form.entry != nil || m.form.fields[fieldResolves].Value() != "#6" {
+		t.Fatalf("X should open a new entry resolving #6: layer %d resolves %q", m.layer, m.form.fields[fieldResolves].Value())
+	}
+	if !strings.Contains(plain(m), "Resolves") {
+		t.Fatalf("form should show the Resolves field:\n%s", plain(m))
+	}
+	checkFits(t, m)
+
+	// A bad reference keeps the form open with the text intact.
+	m = typeText(t, m, "Engineering approved the ARM capacity")
+	m.form.fields[fieldResolves].SetValue("#6, #99")
+	m = send(t, m, key("ctrl+s"))
+	if m.layer != layerForm || m.form.body.Value() != "Engineering approved the ARM capacity" || !m.statusErr {
+		t.Fatalf("bad reference: layer %d status %q", m.layer, m.status)
+	}
+	m.form.fields[fieldResolves].SetValue("#6")
+	m = send(t, m, key("ctrl+s"))
+	if m.layer != layerNone || !strings.Contains(m.status, "Added #7 · resolved #6") {
+		t.Fatalf("save: layer %d status %q", m.layer, m.status)
+	}
+	if c := m.current(); c == nil || c.Ref() != "#7" || !reflect.DeepEqual(c.ResolvesRefs, []string{"#6"}) {
+		t.Fatalf("new entry = %+v", c)
+	}
+	if got, err := m.app.Store.Get(ctx, "6"); err != nil || got.IsOpen() || got.ResolvedByRef != "#7" {
+		t.Fatalf("#6 after resolving: %+v %v", got, err)
+	}
+
+	// X on a resolved item explains instead of opening the form.
+	m = send(t, m, key("n"), key("X")) // still on the detail screen
+	if m.layer != layerNone || !strings.Contains(m.status, "#6 is already resolved") {
+		t.Fatalf("X on a resolved item: layer %d status %q", m.layer, m.status)
+	}
+
+	// Editing an existing entry doesn't offer Resolves.
+	m = send(t, m, key("e"), key("shift+tab"))
+	if m.form.focus != fieldMarks || strings.Contains(ansi.Strip(m.renderForm()), "Resolves") {
+		t.Fatalf("edit form: focus %d\n%s", m.form.focus, ansi.Strip(m.renderForm()))
 	}
 }
 

@@ -340,10 +340,11 @@ const (
 	fieldType
 	fieldTags
 	fieldMarks
+	fieldResolves // new entries only
 	fieldCount
 )
 
-var fieldLabels = [fieldCount]string{"Text", "When", "Project", "Type", "Tags", "Marks"}
+var fieldLabels = [fieldCount]string{"Text", "When", "Project", "Type", "Tags", "Marks", "Resolves"}
 
 type entryForm struct {
 	entry        *journal.Entry // nil when creating
@@ -352,19 +353,34 @@ type entryForm struct {
 	focus        int
 	original     app.EntryDoc
 	confirmLeave bool
+	saving       bool // a new entry is being saved
 }
 
 func (m Model) openForm(e *journal.Entry) (tea.Model, tea.Cmd) {
-	doc := m.app.DocFor(e)
+	return m.openFormDoc(e, m.app.DocFor(e))
+}
+
+// openResolveForm starts a new entry that resolves e, in e's project.
+func (m Model) openResolveForm(e journal.Entry) (tea.Model, tea.Cmd) {
+	if e.ResolvedAt != nil {
+		m.setStatus(e.Ref()+" is already resolved · x reopens it", false)
+		return m, nil
+	}
+	doc := m.app.DocFor(nil)
+	doc.Project, doc.Resolves = e.Project, e.Ref()
+	return m.openFormDoc(nil, doc)
+}
+
+func (m Model) openFormDoc(e *journal.Entry, doc app.EntryDoc) (tea.Model, tea.Cmd) {
 	f := entryForm{original: doc, body: newTextArea()}
 	if e != nil {
 		c := *e
 		f.entry = &c
 	}
 	f.body.SetValue(doc.Body)
-	values := [fieldCount]string{"", doc.Time, doc.Project, doc.Type, doc.Tags, doc.Marks}
+	values := [fieldCount]string{"", doc.Time, doc.Project, doc.Type, doc.Tags, doc.Marks, doc.Resolves}
 	hints := [fieldCount]string{"", "now, 14:30, yesterday 16:00, 2026-10-02 09:15", "project name or alias", strings.Join(journal.TypeStrings(), ", "),
-		"comma separated", strings.Join(journal.MarkStrings(), ", ")}
+		"comma separated", strings.Join(journal.MarkStrings(), ", "), "open problems or follow-ups, e.g. 42, #43"}
 	for i := fieldTime; i < fieldCount; i++ {
 		f.fields[i] = newInput("", hints[i])
 		f.fields[i].SetValue(values[i])
@@ -373,6 +389,14 @@ func (m Model) openForm(e *journal.Entry) (tea.Model, tea.Cmd) {
 	m.layer = layerForm
 	m.layout()
 	return m, m.form.focusField(fieldBody)
+}
+
+// count is the number of fields shown: only a new entry can resolve items.
+func (f entryForm) count() int {
+	if f.entry != nil {
+		return fieldResolves
+	}
+	return fieldCount
 }
 
 func (f *entryForm) focusField(i int) tea.Cmd {
@@ -395,17 +419,22 @@ func (f entryForm) doc() app.EntryDoc {
 		Tags: strings.TrimSpace(f.fields[fieldTags].Value()), Marks: strings.TrimSpace(f.fields[fieldMarks].Value()),
 		Resolved: f.original.Resolved,
 	}
+	if f.entry == nil {
+		d.Resolves = strings.TrimSpace(f.fields[fieldResolves].Value())
+	}
 	return d
 }
 
 func (f entryForm) dirty() bool {
 	d, o := f.doc(), f.original
 	o.Body = strings.TrimSpace(o.Body)
-	return d.Body != o.Body || d.Time != o.Time || d.Project != o.Project || d.Type != o.Type || d.Tags != o.Tags || d.Marks != o.Marks
+	return d.Body != o.Body || d.Time != o.Time || d.Project != o.Project || d.Type != o.Type || d.Tags != o.Tags || d.Marks != o.Marks ||
+		d.Resolves != o.Resolves
 }
 
 func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	f := &m.form
+	n := f.count()
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		key := k.String()
 		if key != "esc" {
@@ -424,9 +453,9 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+s":
 			return m.saveForm()
 		case "tab":
-			return m, f.focusField((f.focus + 1) % fieldCount)
+			return m, f.focusField((f.focus + 1) % n)
 		case "shift+tab":
-			return m, f.focusField((f.focus + fieldCount - 1) % fieldCount)
+			return m, f.focusField((f.focus + n - 1) % n)
 		case "up":
 			if f.focus != fieldBody {
 				return m, f.focusField(f.focus - 1)
@@ -436,7 +465,7 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "down":
 			if f.focus != fieldBody {
-				if f.focus < fieldCount-1 {
+				if f.focus < n-1 {
 					return m, f.focusField(f.focus + 1)
 				}
 				return m, nil
@@ -446,7 +475,7 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if f.focus != fieldBody {
-				if f.focus == fieldCount-1 {
+				if f.focus == n-1 {
 					return m.saveForm()
 				}
 				return m, f.focusField(f.focus + 1)
@@ -463,6 +492,9 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) saveForm() (tea.Model, tea.Cmd) {
+	if m.form.saving {
+		return m, nil
+	}
 	doc := m.form.doc()
 	if doc.Body == "" {
 		m.setStatus("The entry text is empty", true)
@@ -470,10 +502,12 @@ func (m Model) saveForm() (tea.Model, tea.Cmd) {
 	}
 	ctx, a := m.ctx, m.app
 	if m.form.entry == nil {
-		m.layer = layerNone
+		// The form stays open until the save succeeds, so a mistyped
+		// reference or project doesn't lose what was typed.
+		m.form.saving = true
 		return m, func() tea.Msg {
 			res, err := a.CreateFromDoc(ctx, doc)
-			return savedMsg{entry: res.Entry, verb: "Added", created: res.CreatedProject, err: err}
+			return savedMsg{entry: res.Entry, verb: "Added", created: res.CreatedProject, resolved: res.Resolved, fromForm: true, err: err}
 		}
 	}
 	e := *m.form.entry

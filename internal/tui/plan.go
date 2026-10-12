@@ -155,6 +155,11 @@ func (m Model) updatePlanPanel(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.openForm(&e)
 		}
 		return m, nil
+	case "X":
+		if m.planCursor < len(items) {
+			return m.openResolveForm(items[m.planCursor])
+		}
+		return m, nil
 	case "q":
 		return m, tea.Quit
 	case "P", "?", "f1":
