@@ -543,3 +543,15 @@ func TestTextWrapsUnderItemText(t *testing.T) {
 		t.Errorf("without a width the item should stay on one line:\n%s", buf.String())
 	}
 }
+
+func TestPlannedItemsSayWhichPlan(t *testing.T) {
+	e := journal.Entry{Type: journal.TypeFollowUp, PlannedFor: "2026-10-06"}
+	if rs := reasonsFor(e, ""); !slices.Contains(rs, "planned for Tue 6 Oct 2026") {
+		t.Errorf("open planned item: reasons = %v", rs)
+	}
+	done := now
+	e.ResolvedAt = &done
+	if rs := reasonsFor(e, ""); slices.ContainsFunc(rs, func(r string) bool { return strings.HasPrefix(r, "planned") }) {
+		t.Errorf("finished plan items need no note: reasons = %v", rs)
+	}
+}

@@ -70,6 +70,14 @@ holocron search s3          # full-text search
 holocron list --open        # problems and follow-ups still open
 ```
 
+Plan the next working day, and keep that plan in view until it's done:
+
+```bash
+holocron plan "Retire the Vagrant registry" "Pen test remediation"
+holocron plan                         # the current plan, and the next one
+holocron plan --carry all             # move unfinished items to the next plan
+```
+
 Turn them into an update you can paste somewhere:
 
 ```bash
