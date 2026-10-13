@@ -1,0 +1,21 @@
+# Release notes for tagged releases. GoReleaser asks GitHub to generate them
+# (changelog.use: github-native in .goreleaser.yaml), and GitHub lists the
+# pull requests merged since the previous tag, grouped by these labels.
+#
+# Label a pull request "no release notes" to leave it out: CI and workflow
+# changes, repo housekeeping, and internal docs such as ADRs.
+changelog:
+  exclude:
+    labels:
+      - no release notes
+  categories:
+    - title: New features
+      labels: [enhancement]
+    - title: Fixes
+      labels: [bug]
+    - title: Documentation
+      labels: [documentation]
+    - title: Dependencies
+      labels: [dependencies]
+    - title: Other changes
+      labels: ["*"]

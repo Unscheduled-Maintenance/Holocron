@@ -40,9 +40,7 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+# GitHub generates the notes from the merged pull requests, grouped and
+# filtered by label as configured in .github/release.yml.
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
+  use: github-native
