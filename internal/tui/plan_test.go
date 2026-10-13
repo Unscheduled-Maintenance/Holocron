@@ -82,7 +82,12 @@ func TestPlanPanelResolveAndCarry(t *testing.T) {
 	if m.plan.Done() != 1 || !strings.Contains(plain(m), "✓ #7") || !strings.Contains(plain(m), "1 of 2 done") {
 		t.Fatalf("x should resolve the first item:\n%s", plain(m))
 	}
-	m = send(t, m, key("j"), key("esc"))
+	m = send(t, m, key("j"), key("X"))
+	if m.layer != layerForm || m.form.fields[fieldResolves].Value() != "#8" {
+		t.Fatalf("X in the plan should start an entry resolving #8: layer %d", m.layer)
+	}
+	m = send(t, m, key("esc"))
+	m = send(t, m, key("esc"))
 	if m.planFocus || m.planCursor != 1 {
 		t.Fatalf("esc should leave the plan: focus %v cursor %d", m.planFocus, m.planCursor)
 	}

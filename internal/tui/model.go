@@ -169,10 +169,12 @@ type (
 		toEnd   bool // move the cursor to the last entry once appended
 	}
 	savedMsg struct {
-		entry   journal.Entry
-		verb    string
-		created string
-		err     error
+		entry    journal.Entry
+		verb     string
+		created  string
+		resolved []journal.Entry // items the new entry resolved
+		fromForm bool            // saved from the entry form, which is still open
+		err      error
 	}
 	deletedMsg struct {
 		entry journal.Entry
@@ -291,11 +293,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case savedMsg:
+		if msg.fromForm {
+			m.form.saving = false
+		}
 		if msg.err != nil {
 			m.setStatus(errText(msg.err), true)
 			return m, nil
 		}
+		if msg.fromForm && m.layer == layerForm {
+			m.layer = layerNone
+		}
 		text := fmt.Sprintf("%s %s", msg.verb, msg.entry.Ref())
+		if len(msg.resolved) > 0 {
+			refs := make([]string, len(msg.resolved))
+			for i, r := range msg.resolved {
+				refs[i] = r.Ref()
+			}
+			text += " · resolved " + strings.Join(refs, ", ")
+		}
 		if msg.created != "" {
 			text += fmt.Sprintf(" · created project %s", msg.created)
 		}
@@ -490,6 +505,10 @@ func (m Model) updateList(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if c := m.current(); c != nil {
 			return m, m.toggleResolved(*c)
 		}
+	case "X":
+		if c := m.current(); c != nil {
+			return m.openResolveForm(*c)
+		}
 	case "/":
 		return m.openSearch()
 	case "p":
@@ -578,7 +597,7 @@ func (m Model) updateDetail(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	default:
 		// Entry actions work the same on the detail screen as on the list.
 		switch k.String() {
-		case "e", "E", "d", "delete", "m", "x", "a", "A":
+		case "e", "E", "d", "delete", "m", "x", "X", "a", "A":
 			return m.updateList(k)
 		}
 	}
@@ -742,7 +761,7 @@ func (m Model) finishExternalEdit(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 			if errors.Is(err, app.ErrEmptyEntry) {
 				return statusMsg{text: "Empty entry; nothing saved"}
 			}
-			return savedMsg{entry: res.Entry, verb: "Added", created: res.CreatedProject, err: err}
+			return savedMsg{entry: res.Entry, verb: "Added", created: res.CreatedProject, resolved: res.Resolved, err: err}
 		}
 	}
 	e := *msg.entry

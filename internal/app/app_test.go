@@ -215,6 +215,41 @@ func TestEntryDocRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEntryDocResolves(t *testing.T) {
+	ctx := context.Background()
+	a := openApp(t, "")
+	fu, _ := a.Capture(ctx, CaptureInput{Text: "Follow-up: ask about ARM capacity"})
+	pr, _ := a.Capture(ctx, CaptureInput{Text: "Problem: exporter restarts"})
+
+	// A new entry's document offers the field; an existing entry's doesn't.
+	doc := a.DocFor(nil)
+	doc.Resolves = "#1"
+	text := doc.Format("New Holocron entry")
+	if !strings.Contains(text, "\nresolves: #1\n") {
+		t.Fatalf("new doc should have a resolves field:\n%s", text)
+	}
+	if e := fu.Entry; strings.Contains(a.DocFor(&e).Format("x"), "resolves") {
+		t.Fatal("an existing entry's doc should not offer resolves")
+	}
+
+	parsed, err := ParseEntryDoc(strings.Replace(text, "resolves: #1", "resolves: #1 "+pr.Entry.UID, 1) + "ARM capacity approved\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := a.CreateFromDoc(ctx, parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(res.Entry.Resolves, []int64{fu.Entry.ID, pr.Entry.ID}) || len(res.Resolved) != 2 || res.Resolved[0].ResolvedBy != res.Entry.ID {
+		t.Fatalf("Resolves = %v, Resolved = %+v", res.Entry.Resolves, res.Resolved)
+	}
+
+	parsed.Resolves = "#2"
+	if _, err := a.PatchFromDoc(res.Entry, parsed); !errors.Is(err, ErrResolvesOnEdit) {
+		t.Fatalf("resolves on an existing entry: %v", err)
+	}
+}
+
 func TestBackupDestinations(t *testing.T) {
 	ctx := context.Background()
 	a := openApp(t, "")

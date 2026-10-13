@@ -64,7 +64,7 @@ func (m *Model) layout() {
 	m.input.SetWidth(max(10, m.width-6))
 	formW := min(m.width-4, 100)
 	m.form.body.SetWidth(max(10, formW-12))
-	m.form.body.SetHeight(max(2, min(10, m.bodyHeight()-10)))
+	m.form.body.SetHeight(max(2, min(10, m.bodyHeight()-6-(m.form.count()-fieldTime))))
 	for i := fieldTime; i < fieldCount; i++ {
 		m.form.fields[i].SetWidth(max(10, formW-14))
 	}
@@ -384,7 +384,7 @@ func (m Model) detailText(e journal.Entry, width int) string {
 			}
 			row("Status", status)
 		} else {
-			row("Status", sWarn.Render("open")+sFaint.Render("  (x resolves)"))
+			row("Status", sWarn.Render("open")+sFaint.Render("  (x resolves · X with a new entry)"))
 		}
 	}
 	if e.IsPlanned() {
@@ -486,7 +486,7 @@ func (m Model) keyHints() []string {
 			hs = []string{hint("esc", "back"), hint("tab", "next report"), hint("[ ]", "period"), hint("i", "ids"), hint("w", "why"), hint("s", "save"), hint("?", "help")}
 		default:
 			if m.planFocus {
-				hs = []string{hint("x", "done / undone"), hint("e", "edit"), hint("P", "plan next day"), hint("tab", "back to list")}
+				hs = []string{hint("x", "done / undone"), hint("X", "done with an entry"), hint("e", "edit"), hint("P", "plan next day"), hint("tab", "back to list")}
 				break
 			}
 			hs = []string{hint("a", "add"), hint("P", "plan"), hint("/", "search"), hint("enter", "open"), hint("e", "edit"), hint("p t y", "filter"),
@@ -507,10 +507,10 @@ func (m Model) renderHelp() string {
 	}{
 		{"Move", [][2]string{{"↑ ↓  j k", "select entry"}, {"pgup pgdn", "page"}, {"home end  g G", "first / last"}, {"enter", "open entry"}}},
 		{"Entries", [][2]string{{"a", "quick add (+project #tag)"}, {"A", "add with all fields"}, {"e", "edit in a form"}, {"E", "edit in $EDITOR"},
-			{"d", "delete (asks first)"}, {"u", "undo last delete"}, {"m", "report marks"}, {"x", "resolve / reopen"}}},
+			{"d", "delete (asks first)"}, {"u", "undo last delete"}, {"m", "report marks"}, {"x", "resolve / reopen"}, {"X", "resolve with a new entry"}}},
 		{"Find", [][2]string{{"/", "search as you type"}, {"p", "filter by project"}, {"t", "filter by tag"}, {"y", "filter by type"},
 			{"o", "open items only"}, {"r", "choose date range"}, {"[ ]", "previous / next period"}, {"ctrl+r", "reload"}}},
-		{"Plan", [][2]string{{"P", "plan the next working day"}, {"tab", "focus the plan (x done, e edit)"}}},
+		{"Plan", [][2]string{{"P", "plan the next working day"}, {"tab", "focus the plan (x done, X done with an entry, e edit)"}}},
 		{"Reports", [][2]string{{"R", "generate a report"}, {"tab", "next report kind"}, {"i", "show entry ids"}, {"w", "show why items appear"}, {"s", "save as Markdown"}}},
 		{"Leave", [][2]string{{"esc", "back one level: close dialog, leave screen, clear filters"}, {"q", "quit (from the list)"}, {"ctrl+c", "quit from anywhere"}}},
 	}
@@ -604,7 +604,7 @@ func (m Model) renderForm() string {
 		return sDim.Render("  " + l)
 	}
 	b.WriteString(label(fieldBody) + "\n" + f.body.View() + "\n\n")
-	for i := fieldTime; i < fieldCount; i++ {
+	for i := fieldTime; i < f.count(); i++ {
 		b.WriteString(label(i) + " " + f.fields[i].View() + "\n")
 	}
 	return sFocusBox.Render(strings.TrimRight(b.String(), "\n"))

@@ -281,7 +281,8 @@ those lists without deleting anything.
 
 To record what resolved an item, capture it as a new entry instead:
   holocron add "Engineering approved the ARM capacity" --resolves 42
-which resolves #42 and links the two.`,
+which resolves #42 and links the two. In the interactive archive, X on the
+item does the same.`,
 		Example:           "  holocron resolve 42\n  holocron resolve 42 --reopen\n  holocron list --open",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: entryCompletion(e),
