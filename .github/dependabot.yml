@@ -19,6 +19,9 @@ updates:
       interval: monthly
     commit-message:
       prefix: ci
+    # Action bumps only affect CI, so they stay out of the release notes
+    # (.github/release.yml). Setting labels replaces Dependabot's defaults.
+    labels: [dependencies, github_actions, no release notes]
     groups:
       github-actions:
         patterns: ["*"]
